@@ -1,0 +1,44 @@
+# --- Project Specifics ---
+.DS_Store
+__pycache__/
+*.py[cod]
+archive/
+development/
+
+# --- Audio & Features (The "Big" Stuff) ---
+# We ignore all contents of data, but keep the directory
+data/*
+data/test/IRMAS
+!data/scripts/
+!data/test/
+!data/test/a-touch-of-zen/
+!data/test/a-touch-of-zen/*
+!data/.gitkeep
+
+# Ignore weights and logs
+saved_weights/
+*.pt
+*.pth
+*.ckpt
+*.log
+
+# --- Machine Learning Artifacts ---
+# If you decide to keep mels or manifests outside of 'data/', ignore them here
+mels/
+log_mels/
+audio_clips/
+.gradio/
+
+# --- Environment & IDE ---
+.venv/
+venv/
+env/
+.env
+.vscode/
+.idea/
+.ipynb_checkpoints/
+
+# --- Distribution / Packaging ---
+build/
+dist/
+*.egg-info/

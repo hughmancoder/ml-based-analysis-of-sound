@@ -1,0 +1,7 @@
+strings
+pipa
+timpani
+percussion
+sheng
+woodwind
+erhu

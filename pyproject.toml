@@ -1,0 +1,43 @@
+[build-system]
+requires = ["hatchling>=1.21"]
+build-backend = "hatchling.build"
+
+[project]
+name = "mlsound"
+version = "0.1.0"
+description = "Machine learning-based analysis of music and sound in martial arts films"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [
+  { name = "Hugh Signoriello" }
+]
+dependencies = [
+  "librosa>=0.10",
+  "soundfile>=0.12",
+  "audioread>=3.0",
+  "scipy>=1.11",
+  "numpy>=1.26",
+  "matplotlib>=3.8",
+  "pillow>=10.0",
+  "tqdm>=4.65",
+  "torch>=2.0",
+  "torchaudio>=2.0",
+  "ffmpeg-python>=0.2",
+  "pandas>=2.0",
+  "imageio>=2.31",
+  "gradio>=4.0",
+  "datasets[audio]>=2.18",
+  "pyyaml>=6.0",
+]
+
+[project.optional-dependencies]
+dev = [
+  "ruff>=0.6",
+]
+
+[tool.hatch.build]
+# Treat the existing `src/` directory as the top-level package.
+# Import path remains `import src...`, but installation no longer needs PYTHONPATH hacks.
+packages = [{ include = "src" }]
+

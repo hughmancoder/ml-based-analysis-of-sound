@@ -1,0 +1,14 @@
+audio:
+  sr: 44100
+  duration: 3.0
+  n_mels: 128
+  win_ms: 30.0
+  hop_ms: 10.0
+  fmin: 20.0
+  fmax: 20000.0  
+
+paths:
+  train_dir: "data/train"
+  cache_root: "data/processed/log_mels"
+  train_manifest: "data/processed/train_mels.csv"
+  test_manifest: "data/test/a-touch-of-zen.csv"

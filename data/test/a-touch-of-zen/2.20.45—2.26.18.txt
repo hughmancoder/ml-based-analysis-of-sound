@@ -1,0 +1,7 @@
+strings
+woodwind
+erhu
+pipa
+dizi
+french_horn
+percussion

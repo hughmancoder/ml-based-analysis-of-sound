@@ -1,0 +1,7 @@
+sheng
+brass
+percussion
+strings
+operatic_gongs_and_drums
+voice
+bell
