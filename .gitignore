@@ -9,6 +9,8 @@ development/
 # We ignore all contents of data, but keep the directory
 data/*
 data/test/IRMAS
+
+!data/README.md
 !data/scripts/
 !data/test/
 !data/test/a-touch-of-zen/

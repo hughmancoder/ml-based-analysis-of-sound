@@ -59,13 +59,17 @@ def main() -> None:
     print(f"Total clips: {total}  (~{human_time(total_sec)})")
     if not counts:
         return
-    print("\nPer-label clip counts:")
+    print("\nPer-label clip counts:\n")
     width = max(len(k) for k in counts.keys())
+    total_counts = 0
     for label in sorted(counts.keys()):
         n = counts[label]
+        total_counts += n
         dur = human_time(n * CLIP_SECONDS)
         print(f"  {label.ljust(width)}  {str(n).rjust(6)}  (~{dur})")
 
+    print(f"\nTotal clip counts: {total_counts}")
+    
 if __name__ == "__main__":
     main()
 

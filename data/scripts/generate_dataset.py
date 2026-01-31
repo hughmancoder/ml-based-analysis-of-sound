@@ -74,7 +74,8 @@ def generate_dataset(json_path, output_root):
 
 if __name__ == "__main__":
     # Ensure these paths are correct relative to where you run the script
-    input_json = "data/raw_sources/generate_labels.json"
+    # input_json = "data/raw_sources/generate_labels.json"
+    input_json = "data/raw_sources/western_orchestral_labels.json"
     output_directory = "data/train"
     
     generate_dataset(input_json, output_directory)
