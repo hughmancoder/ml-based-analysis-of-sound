@@ -3,8 +3,6 @@ PY ?= $(if $(VENV_PY),$(VENV_PY),python)
 
 PY_SRC := PYTHONPATH=src $(PY)
 PROCESSED_ROOT := data/processed
-TEST_DIR := data/test/a-touch-of-zen
-TEST_MANIFEST := $(TEST_DIR).csv
 CONFIG_FILE := src/configs/audio_params.yaml
 
 # Mix train mels and gennerate spectrogram
@@ -35,9 +33,10 @@ generate_train_mels:
 
 TEST_DIR_AZ := data/test/a-touch-of-zen
 TEST_MANIFEST_AZ := $(TEST_DIR_AZ).csv
-
 TEST_DIR_IRMAS := data/test/IRMAS/IRMAS-TestingData-Part1
 TEST_MANIFEST_IRMAS := $(TEST_DIR_IRMAS).csv
+
+generate_features: generate_train_mels generate_mixed_train_mels
 
 test_manifest:
 	@echo "Creating test manifest..."
@@ -53,5 +52,3 @@ test_manifest_irmas:
 
 clean:
 	rm -rf $(PROCESSED_ROOT)
-
-
