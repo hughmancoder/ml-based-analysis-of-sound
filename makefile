@@ -10,15 +10,15 @@ LABELS_CONFIG := src/configs/labels.yaml
 NUM_MIXES ?= 20000
 MIN_SOURCES ?= 2
 MAX_SOURCES ?= 2
-SNR_DB_MIN ?= -5
-SNR_DB_MAX ?= 10
-MIX_SEED ?= 1337
-NUM_MIXES ?= 500
+SNR_DB_MIN ?= -3
+SNR_DB_MAX ?= 6
+NUM_MIXES ?= 12000 # start with ~150% of dataset size
 
 MIXED_CACHE_ROOT := $(PROCESSED_ROOT)/log_mels_mixed
 MIXED_MANIFEST := $(PROCESSED_ROOT)/train_mels_mixed.csv
 TRAIN_DIR := data/train
 
+# NOTE: premixing will be replaced with mixing at train time to save storage
 generate_mixed_train_mels:
 	$(PY_SRC) src/scripts/generate_mixed_train_mels.py \
 		--config $(CONFIG_FILE) \
@@ -27,7 +27,6 @@ generate_mixed_train_mels:
 		--out_cache_root $(MIXED_CACHE_ROOT) \
 		--out_manifest $(MIXED_MANIFEST) \
 		--num_mixes $(NUM_MIXES) \
-		--seed $(MIX_SEED) \
 		--save_wavs \
 		--wav_out_dir $(PROCESSED_ROOT)/debug/mixed_wavs \
 		--max_wavs 50

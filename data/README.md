@@ -45,9 +45,6 @@ Total clip counts: 8281
 - Banzi Clapper (11)	Percussion	Distinct, but could go in "Percussion" 
 - Electronic (5)	New Class?	If you have 15m of Piano, consider replacing 5m with Synth/Electronic.
 
-
-
-
 ## A touch of zen test dataset
 
 Download train dataset from teams under `General/Datasets/train`

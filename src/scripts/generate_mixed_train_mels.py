@@ -130,7 +130,7 @@ def main() -> None:
     ap.add_argument("--out_manifest", default="data/processed/train_mels_mixed.csv")
     ap.add_argument("--num_mixes", type=int, default=20000)
     ap.add_argument("--min_sources", type=int, default=2)
-    ap.add_argument("--max_sources", type=int, default=3)
+    ap.add_argument("--max_sources", type=int, default=2)
     ap.add_argument("--snr_db_min", type=float, default=-5.0)
     ap.add_argument("--snr_db_max", type=float, default=10.0)
     ap.add_argument("--seed", type=int, default=1337)

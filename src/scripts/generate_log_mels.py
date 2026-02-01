@@ -169,7 +169,7 @@ def main() -> None:
             )
 
             rel_path = npy_path.resolve().as_posix()
-            rows_out.append([rel_path, label])
+            rows_out.append([rel_path, label, wav_path.resolve().as_posix()])
             n_ok += 1
 
         except KeyboardInterrupt:
@@ -181,7 +181,7 @@ def main() -> None:
 
     with open(out_csv, "w", newline="") as f:
         w = csv.writer(f)
-        w.writerow(["filepath", "label"])
+        w.writerow(["filepath", "label", "wavpath"])
         w.writerows(rows_out)
 
     print("\nProcessing Complete.")
