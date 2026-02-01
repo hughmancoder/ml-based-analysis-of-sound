@@ -5,7 +5,7 @@ import re
 from pathlib import Path
 from sklearn.metrics import classification_report, accuracy_score, hamming_loss
 import matplotlib.pyplot as plt
-import tqdm
+from tqdm import tqdm
 from src.preprocessing import calc_fft_hop, ensure_duration, load_audio_stereo, mel_stereo2_from_stereo
 
 def parse_ground_truth(txt_path, label_to_idx):
@@ -59,7 +59,7 @@ def get_prediction(model, mel, device):
     return probs.cpu().numpy()[0]
 
 def find_best_threshold(preds_probs, gts, labels, show_plot=False):
-    thresholds = np.arange(0.05, 0.95, 0.05)
+    thresholds = np.arange(0.05, 1, 0.05)
     micro_f1s = []
     macro_f1s = []
     

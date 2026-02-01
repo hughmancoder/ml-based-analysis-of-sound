@@ -3,5 +3,5 @@ woodwind
 erhu
 pipa
 dizi
-french_horn
+horn
 percussion
