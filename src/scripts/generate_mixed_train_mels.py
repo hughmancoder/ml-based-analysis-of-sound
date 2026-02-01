@@ -3,7 +3,7 @@ import argparse
 import csv
 import random
 from pathlib import Path
-from typing import Dict, List, Tuple
+from typing import Dict, List, Optional, Set, Tuple
 
 import numpy as np
 import yaml
@@ -20,9 +20,27 @@ from preprocessing import (
 )
 
 
-def load_config(config_path: Path) -> dict:
-    with open(config_path, "r") as f:
-        return yaml.safe_load(f)
+def load_yaml(path: Path) -> dict:
+    with open(path, "r") as f:
+        return yaml.safe_load(f) or {}
+
+
+def get_train_labels(cfg: dict) -> Optional[Set[str]]:
+    labels = cfg.get("train_labels")
+    if labels is None:
+        labels = (cfg.get("dataset") or {}).get("train_labels")
+
+    if not labels:
+        return None
+
+    out: Set[str] = set()
+    for x in labels:
+        if x is None:
+            continue
+        s = str(x).strip().lower()
+        if s:
+            out.add(s)
+    return out or None
 
 
 def iter_wavs_by_label(root: Path) -> Dict[str, List[Path]]:
@@ -106,6 +124,7 @@ def save_mixed_npy(
 def main() -> None:
     ap = argparse.ArgumentParser(description="Generate synthetic multilabel mixed mels from wavs")
     ap.add_argument("--config", default="configs/audio_params.yaml")
+    ap.add_argument("--labels_file", help="Optional YAML containing train_labels allow-list")
     ap.add_argument("--train_dir", default=None)
     ap.add_argument("--out_cache_root", default="data/processed/log_mels_mixed")
     ap.add_argument("--out_manifest", default="data/processed/train_mels_mixed.csv")
@@ -123,7 +142,7 @@ def main() -> None:
 
     args = ap.parse_args()
 
-    cfg = load_config(Path(args.config))
+    cfg = load_yaml(Path(args.config))
     audio_cfg = cfg["audio"]
     path_cfg = cfg["paths"]
 
@@ -149,8 +168,25 @@ def main() -> None:
     if args.save_wavs:
         wav_out_dir.mkdir(parents=True, exist_ok=True)
 
+    allowed_labels = get_train_labels(cfg)
+    if args.labels_file:
+        labels_cfg = load_yaml(Path(args.labels_file))
+        allowed_labels = get_train_labels(labels_cfg)
+
     by_label = iter_wavs_by_label(train_dir)
     labels = sorted(by_label.keys())
+
+    if allowed_labels is not None:
+        disk_labels = set(labels)
+        missing = sorted(allowed_labels - disk_labels)
+        extra = sorted(disk_labels - allowed_labels)
+        if missing:
+            print(f"WARNING: These train_labels were not found on disk: {missing}")
+        if extra:
+            print(f"INFO: These labels exist on disk but will be skipped: {extra}")
+
+        labels = [lab for lab in labels if lab in allowed_labels]
+        by_label = {lab: by_label[lab] for lab in labels}
 
     if len(labels) < args.min_sources:
         raise ValueError(f"Need at least {args.min_sources} labels to mix; found {len(labels)} in {train_dir}")

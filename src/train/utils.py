@@ -178,7 +178,7 @@ def evaluate_multi(model, loader, criterion, device, use_cuda_amp, use_mps_amp, 
     return loss_sum / max(1, total), metrics
 
 def multi_label_train_loop(
-    manifest_csv: str,
+    manifest_csv: Sequence[str] | str,
     classes: Sequence[str],
     ckpt_dir: Path,
     epochs: int,

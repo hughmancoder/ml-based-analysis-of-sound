@@ -18,8 +18,6 @@ data/test/IRMAS
 !data/.gitkeep
 
 # Ignore weights and logs
-saved_weights/
-*.pt
 *.pth
 *.ckpt
 *.log

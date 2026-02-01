@@ -9,14 +9,20 @@ from torch.utils.data import Dataset
 import yaml
 
 class MultiLabelMelDataset(Dataset):
-    def __init__(self, manifest_csv: str, class_names: list, project_root: str = ".", transform=None):
+    def __init__(self, manifest_csv, class_names: list, project_root: str = ".", transform=None):
         """
         Args:
-            manifest_csv: Path to the manifest file.
+            manifest_csv: Path to the manifest file or a list of manifest paths.
             class_names: A list of strings (loaded from your YAML in the main script).
             project_root: Root directory to resolve relative paths.
         """
-        self.df = pd.read_csv(manifest_csv)
+        if isinstance(manifest_csv, (list, tuple, set)):
+            if not manifest_csv:
+                raise ValueError("manifest_csv list is empty")
+            frames = [pd.read_csv(path) for path in manifest_csv]
+            self.df = pd.concat(frames, ignore_index=True)
+        else:
+            self.df = pd.read_csv(manifest_csv)
         self.root = Path(project_root)
         
         # We use the list passed from the training loop
