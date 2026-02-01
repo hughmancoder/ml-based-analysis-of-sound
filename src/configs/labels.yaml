@@ -1,22 +1,20 @@
 # --- Project: Chinese & Western Orchestral Taxonomy ---
 train_labels:
-  - pipa
-  - erhu
+  - strings
+  - brass
+  - percussion
+  - woodwind
   - sheng
   - dizi
-  - xiao
-  - piano
-  - guqin
+  - timpani
+  - erhu
+  - pipa
   - suona
   - guzheng
-  - percussion
-
-
-# - strings
-# - woodwinds
-# - brass
-# - electronic
-#  - voice
+  - piano
+  - guqin
+  - xiao
+  - yangqin
 
 irmas:
   - cel
@@ -29,3 +27,4 @@ irmas:
   - tru
   - vio
   - voi
+

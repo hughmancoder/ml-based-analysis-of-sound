@@ -4,6 +4,7 @@ PY ?= $(if $(VENV_PY),$(VENV_PY),python)
 PY_SRC := PYTHONPATH=src $(PY)
 PROCESSED_ROOT := data/processed
 CONFIG_FILE := src/configs/audio_params.yaml
+LABELS_CONFIG := src/configs/labels.yaml
 
 # Mix train mels and gennerate spectrogram
 NUM_MIXES ?= 20000
@@ -20,6 +21,7 @@ TRAIN_DIR := data/train
 generate_mixed_train_mels:
 	$(PY_SRC) src/scripts/generate_mixed_train_mels.py \
 		--config $(CONFIG_FILE) \
+		--labels_file $(LABELS_FILE) \
 		--train_dir $(TRAIN_DIR) \
 		--out_cache_root $(MIXED_CACHE_ROOT) \
 		--out_manifest $(MIXED_MANIFEST) \
@@ -27,9 +29,11 @@ generate_mixed_train_mels:
 		--save_wavs \
 		--wav_out_dir $(PROCESSED_ROOT)/debug/mixed_wavs \
 		--max_wavs 50
-		
+
 generate_train_mels:
-	$(PY_SRC) src/scripts/generate_log_mels.py --config $(CONFIG_FILE)
+	$(PY_SRC) src/scripts/generate_log_mels.py \
+		--config $(CONFIG_FILE) \
+		--labels_file $(LABELS_CONFIG)
 
 TEST_DIR_AZ := data/test/a-touch-of-zen
 TEST_MANIFEST_AZ := $(TEST_DIR_AZ).csv

@@ -7,13 +7,6 @@ import subprocess
 from pathlib import Path
 from typing import Optional, Sequence
 
-DEFAULT_BATCH = [
-    {
-        "url": "https://www.youtube.com/watch?v=z9WAH0ZaKTw&list=RDz9WAH0ZaKTw&start_radio=1",
-        "output": "Epic Low Brass The Rains of Castamere.wav",
-    }
-]
-
 def _repo_root(script_dir: Path) -> Path:
     return script_dir.parents[1]
 
@@ -175,8 +168,26 @@ def main():
         description="Download YouTube audio as WAV (auto batch mode)."
     )
 
+    PATH = "orchestral_instruments"
+    # PATH = "chinese_instruments"
+
+    DEFAULT_BATCH = [
+        {
+            "url": "https://www.youtube.com/watch?v=WAoLJ8GbA4Y",
+            "output": "adagio_for_strings.wav",
+        },
+        {
+            "url": "https://www.youtube.com/watch?v=MP2_6OLummA",
+            "output": "bbc_national_orchestra_of_wales_strings.wav",
+        },
+        {
+            "url": "https://www.youtube.com/watch?v=_2Y1hCgDvNE",
+            "output": "shostakovich_waltz_no_2_carion_wind_quintet_woodwind_and_horn.wav",
+        },
+    ]
+
     # Optional overrides (still useful)
-    parser.add_argument("--folder", default="audio/youtube")
+    parser.add_argument("--folder", default=f"data/raw_sources/{PATH}")
     parser.add_argument("--cookies", type=Path, default=None)
     parser.add_argument("--cookies-from-browser", default=None)
     parser.add_argument("--user-agent", default=None)
@@ -192,9 +203,9 @@ def main():
     args = parser.parse_args()
     script_dir = Path(__file__).resolve().parent
 
-    print("🎬 Running embedded YouTube batch downloader\n")
-    print(f"📁 Output folder: {args.folder}")
-    print(f"🎧 Items to download: {len(DEFAULT_BATCH)}\n")
+    print("Running embedded YouTube batch downloader\n")
+    print(f"Output folder: {args.folder}")
+    print(f"Items to download: {len(DEFAULT_BATCH)}\n")
 
     run_embedded_batch(DEFAULT_BATCH, args, script_dir)
 
