@@ -16,7 +16,11 @@ Film test dataset: `data/test/a-touch-of-zen`
 
 IRMAS test dataset: `data/test/IRMAS`. Download IRMAS test dataset and place in this directory
 
-## Train Dataset Summary
+## Train Dataset 
+
+Download from teams and place in `data/train`
+
+**Dataset summary**
 
 ```plaintext
   strings     1063  (12.8%)  (53m 9s)
