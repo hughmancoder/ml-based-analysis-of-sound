@@ -1,0 +1,7 @@
+brass
+percussion
+strings
+woodwind
+dizi
+sheng
+banzi_clapper

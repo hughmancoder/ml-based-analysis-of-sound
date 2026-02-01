@@ -11,3 +11,6 @@ torchaudio>=2.0
 ffmpeg-python>=0.2
 pandas>=2.0
 imageio>=2.31
+gradio>=4.0
+datasets[audio]>=2.18
+pydub>=2.0

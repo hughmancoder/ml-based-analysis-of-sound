@@ -2,15 +2,12 @@
 
 ## Machine Learning-Based Analysis of Music and Sound in Martial Arts Films
 
-[Project Board](https://github.com/users/hughmancoder/projects/4)
+[Project tasks](https://github.com/users/hughmancoder/projects/4)
 
 ## Setup
 
 Install prequisites on your machine
-
 `git, python3, pip, make`
-
-### Setup environment
 
 ```bash
 # Create virtual environment
@@ -29,28 +26,27 @@ source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
-Activate environment (venv) on every new terminal 
+Activate environment (venv) on every terminal
 
-### Run the project
+## Run the project
 
 refer to the make file for command lines
 
 ```bash
-make chinese_all # generates dataset from video files
+make help
 ```
 
-## Workflow
+### Launch the Gradio interface
 
-Install IRMAS datasets at following locations
-
-data/audio/IRMAS/IRMAS-TestingData-Part1
-data/audio/IRMAS/IRMAS-TrainingData
-
-Run preprocessing pipeline to generate the dataset
+After installing dependencies, start the inference GUI with:
 
 ```bash
-make manifests
-make generate_irmas_train_mels
-generate_irmas_test_mels
+make run_gradio_gui
 ```
 
+This launches the two-tab Gradio app (Model + Info) using the fine-tuned weights at `saved_weights/chinese_single_class/train_1/best_val_acc.pt` by default. Upload or record a ~3 second clip, inspect the generated mel spectrogram, and review the predicted class
+probabilities in the browser.
+
+## Datasets
+
+Refer to data README.md [here](data/README.md) for details on datasets

@@ -1,0 +1,4 @@
+operatic_clapper
+strings
+timpani
+triangle

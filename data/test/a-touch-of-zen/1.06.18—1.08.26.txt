@@ -1,0 +1,6 @@
+timpani
+pipa
+sheng
+strings
+banzi_clapper
+woodwind

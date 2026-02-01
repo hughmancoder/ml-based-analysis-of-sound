@@ -1,131 +1,54 @@
-PY        ?= python
-PY_SRC    := PYTHONPATH=src $(PY)
+VENV_PY := $(firstword $(wildcard .venv/bin/python) $(wildcard .venv/Scripts/python.exe))
+PY ?= $(if $(VENV_PY),$(VENV_PY),python)
 
-# Paths
-DATA_DIR          := data
-IRMAS_TRAIN_DIR   := $(DATA_DIR)/audio/IRMAS/IRMAS-TrainingData
-IRMAS_TEST_DIR    := $(DATA_DIR)/audio/IRMAS/IRMAS-TestingData-Part1
-CHINESE_INSTRUMENTS_DIR  := $(DATA_DIR)/audio/chinese_instruments
-CHN_SOURCES_DIR   := $(CHINESE_INSTRUMENTS_DIR)/sources
-CHN_TRAIN_DIR   := $(CHINESE_INSTRUMENTS_DIR)/train
+PY_SRC := PYTHONPATH=src $(PY)
+PROCESSED_ROOT := data/processed
+CONFIG_FILE := src/configs/audio_params.yaml
 
-CACHE_DIR         := .cache
-IRMAS_MELS_DIR    := $(CACHE_DIR)/mels/irmas
-CHINESE_MELS_DIR    := $(CACHE_DIR)/mels/chinese_instruments
-IRMAS_TEST_MELS_DIR   := $(CACHE_DIR)/mels/irmas/test
+# Mix train mels and gennerate spectrogram
+NUM_MIXES ?= 20000
+MIN_SOURCES ?= 2
+MAX_SOURCES ?= 3
+SNR_DB_MIN ?= -5
+SNR_DB_MAX ?= 10
+MIX_SEED ?= 1337
 
-# Manifests
-MANIFEST_DIR      := $(DATA_DIR)/manifests
-IRMAS_TRAIN_MANIFEST := $(MANIFEST_DIR)/irmas_train.csv
-IRMAS_TRAIN_MELS_CSV := $(MANIFEST_DIR)/irmas_train_mels.csv
-CHINESE_INSTRUMENTS_TRAIN_MELS_CSV := $(MANIFEST_DIR)/chinese_instruments_train_mels.csv
-IRMAS_TEST_MELS_CSV  := $(MANIFEST_DIR)/irmas_test_mels.csv
+MIXED_CACHE_ROOT := $(PROCESSED_ROOT)/log_mels_mixed
+MIXED_MANIFEST := $(PROCESSED_ROOT)/train_mels_mixed.csv
+TRAIN_DIR := data/train
 
-# Audio/Mel Parameters
-SR        := 44100
-DUR       := 3.0 # 30 millisconds instead
-N_MELS    := 128
-WIN_MS    := 30.0
-HOP_MS    := 10.0
-STRIDE_S := 1.5 # NOTE: try 3
-CHANNELS := 2
-VIDEO_TMP_DIR := $(CACHE_DIR)/video_tmp
-CANONICAL_DIR := $(CACHE_DIR)/canonical
+generate_mixed_train_mels:
+	$(PY_SRC) src/scripts/generate_mixed_train_mels.py \
+		--config $(CONFIG_FILE) \
+		--train_dir $(TRAIN_DIR) \
+		--out_cache_root $(MIXED_CACHE_ROOT) \
+		--out_manifest $(MIXED_MANIFEST) \
+		--num_mixes 500 \
+		--save_wavs \
+		--wav_out_dir $(PROCESSED_ROOT)/debug/mixed_wavs \
+		--max_wavs 50
+		
+generate_train_mels:
+	$(PY_SRC) src/scripts/generate_log_mels.py --config $(CONFIG_FILE)
 
-# Compute/IO
-BATCH     := 64
-WORKERS   := 8
+TEST_DIR_AZ := data/test/a-touch-of-zen
+TEST_MANIFEST_AZ := $(TEST_DIR_AZ).csv
+TEST_DIR_IRMAS := data/test/IRMAS/IRMAS-TestingData-Part1
+TEST_MANIFEST_IRMAS := $(TEST_DIR_IRMAS).csv
 
-#  Manifests (train) 
-manifests: 
-	$(PY_SRC) -m scripts.generate_train_manifests \
-	  --irmas_dir $(IRMAS_TRAIN_DIR) \
-	  --chinese_dir $(CHINESE_INSTRUMENTS_DIR) \
-	  --out_dir $(MANIFEST_DIR)
+generate_features: generate_train_mels generate_mixed_train_mels
 
-generate_irmas_train_mels: ## Generate train mel cache + manifest
-	$(PY_SRC) -m scripts.generate_irmas_train_mels \
-	  --irmas_train_dir $(IRMAS_TRAIN_DIR) \
-	  --cache_root $(IRMAS_MELS_DIR)/train \
-	  --mel_manifest_out $(IRMAS_TRAIN_MELS_CSV) \
-	  --sr $(SR) --dur $(DUR) --n_mels $(N_MELS) \
-	  --win_ms $(WIN_MS) --hop_ms $(HOP_MS)
-	 
-generate_irmas_test_mels: ## Generate test mel windows + manifest
-	$(PY_SRC) -m scripts.generate_irmas_test_mels \
-	  --input_dir "$(IRMAS_TEST_DIR)" \
-	  --cache_root "$(IRMAS_TEST_MELS_DIR)" \
-	  --manifest_out "$(IRMAS_TEST_MELS_CSV)" \
-	  --dataset_name IRMAS \
-	  --project_root "$(PROJECT_ROOT)" \
-	  --sr $(SR) --dur $(DUR) --n_mels $(N_MELS) \
-	  --win_ms $(WIN_MS) --hop_ms $(HOP_MS) \
-	  --stride_s $(STRIDE_S)
+test_manifest:
+	@echo "Creating test manifest..."
+	$(PY_SRC) src/scripts/generate_test_manifest.py \
+		--test_dir $(TEST_DIR) \
+		--out_csv $(OUT_CSV)
 
-generate_chinese_train_mels: 
-	$(PY_SRC) -m scripts.generate_irmas_train_mels \
-	  --irmas_train_dir $(CHN_TRAIN_DIR) \
-	  --cache_root $(CHINESE_MELS_DIR) \
-	  --mel_manifest_out $(CHINESE_INSTRUMENTS_TRAIN_MELS_CSV) \
-	  --sr $(SR) --dur $(DUR) --n_mels $(N_MELS) \
-	  --win_ms $(WIN_MS) --hop_ms $(HOP_MS)
+test_manifest_az:
+	@$(MAKE) test_manifest TEST_DIR=$(TEST_DIR_AZ) OUT_CSV=$(TEST_MANIFEST_AZ)
 
-# Chinese instruments generation
-chinese_percussion:  
-	$(PY_SRC) -m scripts.generate_data_from_json \
-	  --input $(CHN_SOURCES_DIR)/percussion.json \
-	  --out-root $(CHN_TRAIN_DIR) \
-	  --tmp-dir $(VIDEO_TMP_DIR) \
-	  --canon-dir $(CANONICAL_DIR) \
-	  --repo-root $(CURDIR) \
-	  --sample-rate $(SR) \
-	  --channels $(CHANNELS) \
-	  --clip-sec $(DUR) \
-	  --stride-sec $(DUR)
+test_manifest_irmas:
+	@$(MAKE) test_manifest TEST_DIR=$(TEST_DIR_IRMAS) OUT_CSV=$(TEST_MANIFEST_IRMAS)
 
-chinese_dizi: ## Build Dizi dataset from JSON source
-	$(PY_SRC) -m scripts.generate_data_from_json \
-	  --input $(CHN_SOURCES_DIR)/dizi.json \
-	  --out-root $(CHN_TRAIN_DIR) \
-	  --tmp-dir $(VIDEO_TMP_DIR) \
-	  --canon-dir $(CANONICAL_DIR) \
-	  --repo-root $(CURDIR) \
-	  --sample-rate $(SR) \
-	  --channels $(CHANNELS) \
-	  --clip-sec $(DUR) \
-	  --stride-sec $(DUR)
-
-chinese_guzheng:  ## Build Guzheng dataset from JSON source
-	$(PY_SRC) -m scripts.generate_data_from_json \
-	  --input $(CHN_SOURCES_DIR)/guzheng.json \
-	  --out-root $(CHN_TRAIN_DIR) \
-	  --tmp-dir $(VIDEO_TMP_DIR) \
-	  --canon-dir $(CANONICAL_DIR) \
-	  --repo-root $(CURDIR) \
-	  --sample-rate $(SR) \
-	  --channels $(CHANNELS) \
-	  --clip-sec $(DUR) \
-	  --stride-sec $(DUR)
-
-chinese_suona:  ## Build Suona dataset from JSON source
-	$(PY_SRC) -m scripts.generate_data_from_json \
-	  --input $(CHN_SOURCES_DIR)/suona.json \
-	  --out-root $(CHN_TRAIN_DIR) \
-	  --tmp-dir $(VIDEO_TMP_DIR) \
-	  --canon-dir $(CANONICAL_DIR) \
-	  --repo-root $(CURDIR) \
-	  --sample-rate $(SR) \
-	  --channels $(CHANNELS) \
-	  --clip-sec $(DUR) \
-	  --stride-sec $(DUR)
-
-chinese_all: chinese_percussion chinese_dizi chinese_guzheng chinese_suona ## Build all Chinese datasets
-
-chinese_summary: ## Summarise Chinese dataset directory
-	$(PY_SRC) -m scripts.summarise_data --root $(CHN_TRAIN_DIR)
-
-IRMAS_summary: ## Summarise Chinese dataset directory
-	$(PY_SRC) -m scripts.summarise_data --root $(IRMAS_TRAIN_DIR)
-
-clean_cache: ## Remove cached mel/spec/tmp data
-	rm -rf $(CACHE_DIR)/mels $(CACHE_DIR)/mels_chinese $(CACHE_DIR)/canonical $(CACHE_DIR)/video_tmp
+clean:
+	rm -rf $(PROCESSED_ROOT)

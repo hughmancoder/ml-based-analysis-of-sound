@@ -1,4 +1,4 @@
 """Model definitions for ML-based analysis of sound."""
-from .CNNVarTime import CNNVarTime
+from .CNN import CNN
 
-__all__ = ["CNNVarTime"]
+__all__ = ["CNN"]

@@ -1,0 +1,8 @@
+woodwind
+pipa
+erhu
+timpani
+sheng
+strings
+banzi_clapper
+percussion
