@@ -1,6 +1,6 @@
 """ Usage
-python src/train/train.py \
-  --run_name CNN_v2 \
+python src/train/train_chinese_mel.py \
+  --run_name Chinese_mel_v1 \
   --manifests ../../data/processed/train_mels.csv \
   --labels_yaml src/configs/labels.yaml \
   --audio_yaml src/configs/audio_params.yaml \
@@ -23,12 +23,12 @@ def find_repo_root() -> Path:
     return root
 
 def load_yaml(path: Path) -> dict:
-    with open(path, "r") as f:
+    with open(path, "r", encoding="utf-8") as f:
         return yaml.safe_load(f) or {}
 
 def main() -> None:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--run_name", default="CNN_v1")
+    ap.add_argument("--run_name", default="Chinese_mel_v1")
     ap.add_argument("--weights_dir", default=None, help="Override weights dir; default uses ../models/saved_weights/<run_name>")
     ap.add_argument("--manifests", nargs="+", required=True, help="One or more manifest CSVs")
     ap.add_argument("--labels_yaml", required=True)
@@ -91,7 +91,7 @@ def main() -> None:
         "resume": args.resume,
         "warm_start": args.warm_start,
     }
-    with open(ckpt_dir / "run_config.yaml", "w") as f:
+    with open(ckpt_dir / "run_config.yaml", "w", encoding="utf-8") as f:
         yaml.safe_dump(run_cfg, f, sort_keys=False)
 
     resume_ckpt = ckpt_dir / "last.pt"

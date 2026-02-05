@@ -111,7 +111,7 @@ def main():
             print(f"[WARN] Failed {wav_path}: {e}", file=sys.stderr)
             traceback.print_exc(file=sys.stderr)
 
-    with open(manifest_out, "w", newline="") as f:
+    with open(manifest_out, "w", newline="", encoding="utf-8") as f:
         writer = csv.writer(f)
         writer.writerow(["filepath", "labels", "filename", "start_ms", "dataset"])
         writer.writerows(rows)

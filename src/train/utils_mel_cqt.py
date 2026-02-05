@@ -15,7 +15,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from src.data_loader import MultiLabelMelDataset
+from src.data_loader_mel_cqt import MultiLabelMelCqtDataset
 
 # --- 1. Core Utilities ---
 
@@ -49,9 +49,8 @@ def get_device():
 
     return device, use_cuda_amp, use_mps_amp, scaler, pin_mem
 
-def build_model(num_classes: int, dropout: float, in_ch: int = 2, device: str = "cpu"):
+def build_model(num_classes: int, dropout: float, in_ch: int = 4, device: str = "cpu"):
     """Instantiates the CNNVarTime model and moves it to the target device."""
-    # Importing inside function to avoid circular imports if CNNVarTime is in a separate file
     from src.models.CNN import CNN 
     model = CNN(in_ch=in_ch, num_classes=num_classes, p_drop=dropout)
     return model.to(device)
@@ -90,14 +89,13 @@ def load_checkpoint(
     return ckpt
 
 def collate_fn_padd(batch):
-    """Pads variable length mel spectrograms to the maximum width in the batch."""
+    """Pads variable length spectrograms to the maximum width in the batch."""
     tensors = [item[0] for item in batch]
     targets = torch.stack([item[1] for item in batch])
     
-    # Pad the width (dim 2) -> Shape: (2, 128, W)
-    tensors = [t.permute(2, 0, 1) for t in tensors] # Time to dim 0
+    tensors = [t.permute(2, 0, 1) for t in tensors]
     tensors_padded = torch.nn.utils.rnn.pad_sequence(tensors, batch_first=True)
-    tensors_padded = tensors_padded.permute(0, 2, 3, 1) # Back to (B, C, H, W)
+    tensors_padded = tensors_padded.permute(0, 2, 3, 1)
     
     return tensors_padded, targets
 
@@ -127,7 +125,6 @@ def train_one_epoch_multi(model, loader, criterion, optimizer, scaler, device, u
         X, y = X.to(device, non_blocking=pin_mem), y.to(device, non_blocking=pin_mem)
         optimizer.zero_grad(set_to_none=True)
 
-        # Handle Mixed Precision
         context = torch.amp.autocast("cuda") if use_cuda_amp else \
                   (torch.autocast(device_type="mps", dtype=torch.float16) if use_mps_amp else torch.enable_grad())
         
@@ -194,13 +191,13 @@ def multi_label_train_loop(
     audio_cfg: dict,
     resume_from: Optional[Path] = None,
     save_best_stamped: bool = False,
+    in_ch: int = 4,
 ):
 
     seed_everything(seed)
     device, use_cuda_amp, use_mps_amp, scaler, pin_mem = get_device()
     
-    # Load Dataset
-    dataset = MultiLabelMelDataset(
+    dataset = MultiLabelMelCqtDataset(
         manifest_csv=manifest_csv,
         class_names=classes,
         project_root=REPO_ROOT,
@@ -211,10 +208,10 @@ def multi_label_train_loop(
     train_loader = DataLoader(train_ds, batch_size=batch_size, shuffle=True, num_workers=num_workers, pin_memory=pin_mem, collate_fn=collate_fn_padd)
     val_loader = DataLoader(val_ds, batch_size=batch_size, shuffle=False, num_workers=num_workers, pin_memory=pin_mem, collate_fn=collate_fn_padd)
 
-    model = build_model(num_classes=len(classes), dropout=dropout, device=device)
+    model = build_model(num_classes=len(classes), dropout=dropout, in_ch=in_ch, device=device)
     optimizer = torch.optim.AdamW(model.parameters(), lr=lr, weight_decay=weight_decay)
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=epochs)
-    criterion = nn.BCEWithLogitsLoss() # This treats each instrument as an independent binary classification task.
+    criterion = nn.BCEWithLogitsLoss()
 
     history = {k: [] for k in ["train_loss", "val_loss", "train_micro_f1", "val_micro_f1", "train_macro_f1", "val_macro_f1"]}
     start_epoch, best_val_f1, no_improve = 1, 0.0, 0
@@ -232,7 +229,6 @@ def multi_label_train_loop(
         
         scheduler.step()
         
-        # Update History
         history["train_loss"].append(train_loss); history["val_loss"].append(val_loss)
         history["train_micro_f1"].append(train_m["micro_f1"]); history["val_micro_f1"].append(val_m["micro_f1"])
         history["train_macro_f1"].append(train_m["macro_f1"]); history["val_macro_f1"].append(val_m["macro_f1"])
@@ -245,9 +241,11 @@ def multi_label_train_loop(
             "opt_state": optimizer.state_dict(),
             "history": history,
             "best_val_micro_f1": best_val_f1,
-            "classes": classes,            # List of instrument names in order
-            "audio_config": audio_cfg,     # sr, n_mels, hop_ms, etc.
-            "label_to_idx": dataset.label_to_idx
+            "classes": classes,
+            "audio_config": audio_cfg,
+            "label_to_idx": dataset.label_to_idx,
+            "feature_mode": "mel_cqt",
+            "in_ch": in_ch,
         }
         save_checkpoint(payload, ckpt_dir / "last.pt")
 
@@ -267,7 +265,6 @@ def plot_metrics(history):
     
     plt.figure(figsize=(15, 5))
 
-    # Plot Loss
     plt.subplot(1, 3, 1)
     plt.plot(epochs, history["train_loss"], label='Train Loss')
     plt.plot(epochs, history["val_loss"], label='Val Loss')
@@ -275,7 +272,6 @@ def plot_metrics(history):
     plt.xlabel('Epochs')
     plt.legend()
 
-    # Plot Micro F1
     plt.subplot(1, 3, 2)
     plt.plot(epochs, history["train_micro_f1"], label='Train Micro F1')
     plt.plot(epochs, history["val_micro_f1"], label='Val Micro F1')
@@ -283,7 +279,6 @@ def plot_metrics(history):
     plt.xlabel('Epochs')
     plt.legend()
 
-    # Plot Macro F1
     plt.subplot(1, 3, 3)
     plt.plot(epochs, history["train_macro_f1"], label='Train Macro F1')
     plt.plot(epochs, history["val_macro_f1"], label='Val Macro F1')

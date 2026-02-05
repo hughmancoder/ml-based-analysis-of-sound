@@ -27,7 +27,7 @@ def to_relative_path(path: Path, base: Path = PROJECT_ROOT) -> str:
 
 def write_manifest(rows, out_csv: Path):
     out_csv.parent.mkdir(parents=True, exist_ok=True)
-    with open(out_csv, "w", newline="") as f:
+    with open(out_csv, "w", newline="", encoding="utf-8") as f:
         w = csv.writer(f)
         w.writerow(["filepath","label"])
         w.writerows(rows)

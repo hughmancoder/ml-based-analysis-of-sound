@@ -18,7 +18,9 @@ def main():
             # Store paths relative to the project root
             rows.append([str(wav_file), str(txt_file)])
 
-    with open(args.out_csv, "w", newline="") as f:
+    out_csv = Path(args.out_csv)
+    out_csv.parent.mkdir(parents=True, exist_ok=True)
+    with open(out_csv, "w", newline="", encoding="utf-8") as f:
         writer = csv.writer(f)
         writer.writerow(["wav_path", "txt_path"])
         writer.writerows(rows)

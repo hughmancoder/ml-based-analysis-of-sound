@@ -2,16 +2,17 @@
 import argparse
 import csv
 import random
+import math
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from pathlib import Path
 from typing import Dict, List, Optional, Set, Tuple
 
+import librosa
 import numpy as np
 import yaml
 from tqdm import tqdm
-import soundfile as sf  # <-- needed for saving wavs
+import soundfile as sf
 
-# Reuse your existing preprocessing utilities
 from preprocessing import (
     calc_fft_hop,
     ensure_duration,
@@ -67,58 +68,63 @@ def mix_stereo_waveforms(
 ) -> np.ndarray:
     """
     Mixes a list of stereo waveforms (each shape: (2, T)).
-
-    We treat the first waveform as 'base', then scale additional sources to
-    a random SNR relative to the base RMS, and add them.
-
-    Returns:
-        mixed stereo waveform (2, T), peak-normalised to avoid clipping.
+    Mixing is done in the time domain; the same mixed waveform is used
+    to compute both Mel and CQT features.
     """
     assert len(stereos) >= 2
     base = stereos[0].astype(np.float32, copy=True)
-
-    # Use combined-channel RMS for scaling (simple + robust)
     base_rms = rms(base)
 
     mix = base
     for s in stereos[1:]:
         s = s.astype(np.float32, copy=False)
         s_rms = rms(s)
-
         snr_db = random.uniform(*snr_db_range)
-        # scale so that 20log10(base_rms / (gain*s_rms)) = snr_db
         gain = (base_rms / (s_rms + 1e-12)) * (10 ** (-snr_db / 20.0))
         mix = mix + s * float(gain)
 
-    # Peak normalise with a tiny headroom
     peak = float(np.max(np.abs(mix)) + 1e-12)
     mix = (0.99 * mix / peak).astype(np.float32)
     return mix
+
+
+def _cqt_stereo2_from_stereo(
+    stereo: np.ndarray,
+    sr: int,
+    n_bins: int,
+    bins_per_octave: int,
+    hop_length: int,
+    fmin: float,
+) -> np.ndarray:
+    feats = []
+    for ch in range(2):
+        C = librosa.cqt(
+            y=stereo[ch],
+            sr=sr,
+            hop_length=hop_length,
+            fmin=fmin,
+            n_bins=n_bins,
+            bins_per_octave=bins_per_octave,
+        )
+        C_mag = np.abs(C)
+        C_db = librosa.amplitude_to_db(C_mag, ref=np.max).astype(np.float32)
+        feats.append(C_db)
+    return np.stack(feats, axis=0)
 
 
 def save_mixed_npy(
     cache_root: Path,
     labels: List[str],
     idx: int,
-    sr: int,
-    dur: float,
-    n_mels: int,
-    win_ms: float,
-    hop_ms: float,
-    mel: np.ndarray,
+    tag: str,
+    array: np.ndarray,
 ) -> Path:
-    """
-    Saves mixed mel into cache_root/<first_label>/[lab1_lab2...]mix_000001__tag.npy
-    """
     labels_norm = [l.strip().lower() for l in labels]
     labels_tag = "_".join(labels_norm)
-
-    tag = f"sr{sr}_dur{dur}_m{n_mels}_w{int(win_ms)}_h{int(hop_ms)}"
     fn = f"[{labels_tag}]mix_{idx:06d}__{tag}.npy"
-
     out_dir = ensure_dir(cache_root / labels_norm[0])
     out_path = out_dir / fn
-    np.save(out_path, mel.astype(np.float32))
+    np.save(out_path, array.astype(np.float32))
     return out_path
 
 
@@ -197,29 +203,45 @@ def _mix_one(idx: int):
             fmax=_G_AUDIO.get("fmax"),
         )
 
-        npy_path = save_mixed_npy(
-            cache_root=Path(_G_AUDIO["cache_root"]),
-            labels=chosen_labels,
-            idx=idx,
+        cqt = _cqt_stereo2_from_stereo(
+            mixed_stereo,
             sr=int(_G_AUDIO["sr"]),
-            dur=float(_G_AUDIO["dur"]),
-            n_mels=int(_G_AUDIO["n_mels"]),
-            win_ms=float(_G_AUDIO["win_ms"]),
-            hop_ms=float(_G_AUDIO["hop_ms"]),
-            mel=mel,
+            n_bins=int(_G_AUDIO["n_bins"]),
+            bins_per_octave=int(_G_AUDIO["bins_per_octave"]),
+            hop_length=int(_G_AUDIO["hop"]),
+            fmin=float(_G_AUDIO["fmin"]),
         )
 
-        return True, idx, npy_path, "|".join(chosen_labels), None
+        mel_tag = f"sr{int(_G_AUDIO['sr'])}_dur{float(_G_AUDIO['dur'])}_m{int(_G_AUDIO['n_mels'])}_w{int(_G_AUDIO['win_ms'])}_h{int(_G_AUDIO['hop_ms'])}"
+        cqt_tag = f"sr{int(_G_AUDIO['sr'])}_dur{float(_G_AUDIO['dur'])}_b{int(_G_AUDIO['n_bins'])}_w{int(_G_AUDIO['win_ms'])}_h{int(_G_AUDIO['hop_ms'])}"
+
+        mel_path = save_mixed_npy(
+            cache_root=Path(_G_AUDIO["mel_cache_root"]),
+            labels=chosen_labels,
+            idx=idx,
+            tag=mel_tag,
+            array=mel,
+        )
+        cqt_path = save_mixed_npy(
+            cache_root=Path(_G_AUDIO["cqt_cache_root"]),
+            labels=chosen_labels,
+            idx=idx,
+            tag=cqt_tag,
+            array=cqt,
+        )
+
+        return True, idx, mel_path, cqt_path, "|".join(chosen_labels), None
     except Exception as e:
-        return False, idx, None, None, str(e)
+        return False, idx, None, None, None, str(e)
 
 
 def main() -> None:
-    ap = argparse.ArgumentParser(description="Generate synthetic multilabel mixed mels from wavs")
+    ap = argparse.ArgumentParser(description="Generate synthetic multilabel mixed Mel+CQT from wavs")
     ap.add_argument("--config", default="configs/audio_params.yaml")
     ap.add_argument("--labels_file", help="Optional YAML containing train_labels allow-list")
     ap.add_argument("--train_dir", default=None)
     ap.add_argument("--out_cache_root", default="data/processed/log_mels_mixed")
+    ap.add_argument("--out_cqt_root", default="data/processed/log_cqt_mixed")
     ap.add_argument("--out_manifest", default="data/processed/train_mels_mixed.csv")
     ap.add_argument("--num_mixes", type=int, default=20000)
     ap.add_argument("--min_sources", type=int, default=2)
@@ -228,6 +250,8 @@ def main() -> None:
     ap.add_argument("--snr_db_max", type=float, default=10.0)
     ap.add_argument("--seed", type=int, default=1337)
     ap.add_argument("--num_workers", type=int, default=19)
+    ap.add_argument("--n_bins", type=int, default=None)
+    ap.add_argument("--bins_per_octave", type=int, default=12)
 
     # Debug wav dumping
     ap.add_argument("--save_wavs", action="store_true")
@@ -250,12 +274,24 @@ def main() -> None:
     hop_ms = float(audio_cfg["hop_ms"])
     fmin = float(audio_cfg["fmin"])
     fmax = audio_cfg.get("fmax")
+    n_bins = int(args.n_bins or n_mels)
+    if fmin <= 0:
+        raise ValueError(f"fmin must be > 0 for CQT, got {fmin}")
+    max_freq = float(fmax) if fmax else (sr / 2.0)
+    if max_freq <= fmin:
+        raise ValueError(f"Invalid CQT range: fmin={fmin} >= max_freq={max_freq}")
+    max_bins = int(math.floor(args.bins_per_octave * math.log2(max_freq / fmin)))
+    if n_bins > max_bins:
+        print(f"[WARN] CQT n_bins={n_bins} exceeds Nyquist; capping to {max_bins}")
+        n_bins = max_bins
 
     train_dir = Path(args.train_dir or path_cfg["train_dir"])
-    cache_root = Path(args.out_cache_root)
+    mel_cache_root = Path(args.out_cache_root)
+    cqt_cache_root = Path(args.out_cqt_root)
     out_csv = Path(args.out_manifest)
 
-    ensure_dir(cache_root)
+    ensure_dir(mel_cache_root)
+    ensure_dir(cqt_cache_root)
     ensure_dir(out_csv.parent)
 
     wav_out_dir = Path(args.wav_out_dir)
@@ -289,16 +325,16 @@ def main() -> None:
         if not by_label[lab]:
             raise ValueError(f"No wavs found for label '{lab}'")
 
-    # Precompute FFT/hop parameters once, reuse for all samples
     n_fft, hop, win_length = calc_fft_hop(sr, win_ms, hop_ms)
     snr_range = (args.snr_db_min, args.snr_db_max)
 
-    print("--- Generating Mixed Mels ---")
+    print("--- Generating Mixed Mel+CQT ---")
     print(f"Source: {train_dir}")
-    print(f"Cache:  {cache_root}")
+    print(f"Mel Cache:  {mel_cache_root}")
+    print(f"CQT Cache:  {cqt_cache_root}")
     print(f"Manifest: {out_csv}")
     print(f"Mixes: {args.num_mixes} | sources: {args.min_sources}-{args.max_sources} | snr_db: {snr_range}")
-    print(f"Params: SR={sr}, Dur={dur}s, Mels={n_mels}, Win={win_ms}ms, Hop={hop_ms}ms")
+    print(f"Params: SR={sr}, Dur={dur}s, Mels={n_mels}, CQT bins={n_bins}, Win={win_ms}ms, Hop={hop_ms}ms")
     if args.save_wavs:
         print(f"Debug WAVs: saving first {args.max_wavs} mixes to {wav_out_dir}")
 
@@ -306,6 +342,8 @@ def main() -> None:
         "sr": sr,
         "dur": dur,
         "n_mels": n_mels,
+        "n_bins": n_bins,
+        "bins_per_octave": int(args.bins_per_octave),
         "win_ms": win_ms,
         "hop_ms": hop_ms,
         "fmin": fmin,
@@ -313,7 +351,8 @@ def main() -> None:
         "n_fft": n_fft,
         "hop": hop,
         "win_length": win_length,
-        "cache_root": cache_root,
+        "mel_cache_root": mel_cache_root,
+        "cqt_cache_root": cqt_cache_root,
     }
 
     num_workers = max(1, int(args.num_workers or 1))
@@ -336,9 +375,13 @@ def main() -> None:
     if num_workers == 1:
         _init_worker(*init_args)
         for i in tqdm(range(args.num_mixes), desc="Mixing"):
-            ok, idx, npy_path, labels_joined, err = _mix_one(i)
+            ok, idx, mel_path, cqt_path, labels_joined, err = _mix_one(i)
             if ok:
-                rows_out_by_idx[idx] = [npy_path.resolve().as_posix(), labels_joined]
+                rows_out_by_idx[idx] = [
+                    mel_path.resolve().as_posix(),
+                    cqt_path.resolve().as_posix(),
+                    labels_joined,
+                ]
                 n_ok += 1
             else:
                 n_fail += 1
@@ -348,9 +391,13 @@ def main() -> None:
             futures = [executor.submit(_mix_one, i) for i in range(args.num_mixes)]
             try:
                 for fut in tqdm(as_completed(futures), total=len(futures), desc="Mixing"):
-                    ok, idx, npy_path, labels_joined, err = fut.result()
+                    ok, idx, mel_path, cqt_path, labels_joined, err = fut.result()
                     if ok:
-                        rows_out_by_idx[idx] = [npy_path.resolve().as_posix(), labels_joined]
+                        rows_out_by_idx[idx] = [
+                            mel_path.resolve().as_posix(),
+                            cqt_path.resolve().as_posix(),
+                            labels_joined,
+                        ]
                         n_ok += 1
                     else:
                         n_fail += 1
@@ -364,7 +411,7 @@ def main() -> None:
 
     with open(out_csv, "w", newline="", encoding="utf-8") as f:
         w = csv.writer(f)
-        w.writerow(["filepath", "labels"])
+        w.writerow(["filepath", "cqt_path", "labels"])
         w.writerows(rows_out)
 
     print("Done.")
