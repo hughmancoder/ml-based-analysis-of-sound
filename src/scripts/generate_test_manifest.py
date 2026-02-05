@@ -1,6 +1,9 @@
 import csv
 import argparse
 from pathlib import Path
+from utils.safe_paths import guard_path
+
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
 def main():
     ap = argparse.ArgumentParser()
@@ -18,7 +21,7 @@ def main():
             # Store paths relative to the project root
             rows.append([str(wav_file), str(txt_file)])
 
-    out_csv = Path(args.out_csv)
+    out_csv = guard_path(Path(args.out_csv), PROJECT_ROOT, "out_csv")
     out_csv.parent.mkdir(parents=True, exist_ok=True)
     with open(out_csv, "w", newline="", encoding="utf-8") as f:
         writer = csv.writer(f)

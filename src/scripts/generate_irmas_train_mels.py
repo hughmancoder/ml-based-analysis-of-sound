@@ -28,6 +28,7 @@ from utils.mel_utils import (
     _safe_relpath,
     precache_one,
 )
+from utils.safe_paths import guard_path
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
@@ -98,8 +99,8 @@ def main():
 
     args = ap.parse_args()
 
-    cache_root   = Path(args.cache_root)
-    out_csv      = Path(args.mel_manifest_out)
+    cache_root = guard_path(Path(args.cache_root), PROJECT_ROOT, "cache_root")
+    out_csv = guard_path(Path(args.mel_manifest_out), PROJECT_ROOT, "mel_manifest_out")
 
     # Decide input mode
     mode = None

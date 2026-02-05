@@ -10,6 +10,9 @@ import numpy as np
 import yaml
 from tqdm import tqdm
 import soundfile as sf  # <-- needed for saving wavs
+from utils.safe_paths import guard_path
+
+PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 
 # Reuse your existing preprocessing utilities
 from preprocessing import (
@@ -252,13 +255,13 @@ def main() -> None:
     fmax = audio_cfg.get("fmax")
 
     train_dir = Path(args.train_dir or path_cfg["train_dir"])
-    cache_root = Path(args.out_cache_root)
+    cache_root = guard_path(Path(args.out_cache_root), PROJECT_ROOT, "out_cache_root")
     out_csv = Path(args.out_manifest)
 
     ensure_dir(cache_root)
     ensure_dir(out_csv.parent)
 
-    wav_out_dir = Path(args.wav_out_dir)
+    wav_out_dir = guard_path(Path(args.wav_out_dir), PROJECT_ROOT, "wav_out_dir")
     if args.save_wavs:
         wav_out_dir.mkdir(parents=True, exist_ok=True)
 

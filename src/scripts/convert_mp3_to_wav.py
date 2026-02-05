@@ -3,6 +3,9 @@ import argparse
 import subprocess
 import sys
 from pathlib import Path
+from utils.safe_paths import guard_path
+
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
 
 def main() -> None:
@@ -14,7 +17,7 @@ def main() -> None:
     ap.add_argument("--overwrite", action="store_true")
     args = ap.parse_args()
 
-    root = Path(args.root)
+    root = guard_path(Path(args.root), PROJECT_ROOT, "root")
     if not root.exists():
         print(f"[ERROR] Root not found: {root}", file=sys.stderr)
         sys.exit(2)

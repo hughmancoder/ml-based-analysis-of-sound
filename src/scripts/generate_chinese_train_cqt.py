@@ -13,6 +13,7 @@ import yaml
 from tqdm import tqdm
 
 from preprocessing import load_audio_stereo, ensure_duration
+from utils.safe_paths import guard_path
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 
@@ -142,7 +143,7 @@ def main() -> None:
     path_cfg = cfg["paths"]
 
     raw_dir = Path(args.train_dir or path_cfg["train_dir"])
-    cache_root = Path(args.cqt_cache_root)
+    cache_root = guard_path(Path(args.cqt_cache_root), PROJECT_ROOT, "cqt_cache_root")
 
     if "manifest_path" in path_cfg:
         manifest_path = path_cfg["manifest_path"]
@@ -153,7 +154,7 @@ def main() -> None:
             "Missing manifest path in config. Expected 'manifest_path' or 'train_manifest' under 'paths'."
         )
 
-    out_csv = Path(manifest_path)
+    out_csv = guard_path(Path(manifest_path), PROJECT_ROOT, "manifest_path")
     if not out_csv.exists():
         raise FileNotFoundError(f"Mel manifest not found: {out_csv} (run mel generation first)")
 

@@ -27,6 +27,9 @@ from utils.mel_utils import (
     _stereo_to_mel,
     _safe_relpath,
 )
+from utils.safe_paths import guard_path
+
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
 
 def main():
@@ -49,8 +52,8 @@ def main():
     args = ap.parse_args()
 
     input_root   = Path(args.input_dir)
-    cache_root   = Path(args.cache_root).resolve()
-    manifest_out = Path(args.manifest_out)
+    cache_root = guard_path(Path(args.cache_root), PROJECT_ROOT, "cache_root")
+    manifest_out = guard_path(Path(args.manifest_out), PROJECT_ROOT, "manifest_out")
     project_root = Path(args.project_root).resolve()
 
     cache_root.mkdir(parents=True, exist_ok=True)

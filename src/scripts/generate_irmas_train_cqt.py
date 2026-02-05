@@ -17,6 +17,7 @@ import numpy as np
 import pandas as pd
 
 from preprocessing import load_audio_stereo, ensure_duration
+from utils.safe_paths import guard_path
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
@@ -171,8 +172,8 @@ def main():
     args = ap.parse_args()
 
     train_dir = Path(args.irmas_train_dir)
-    cache_root = Path(args.cache_root)
-    out_csv = Path(args.mel_manifest_out)
+    cache_root = guard_path(Path(args.cache_root), PROJECT_ROOT, "cache_root")
+    out_csv = guard_path(Path(args.mel_manifest_out), PROJECT_ROOT, "mel_manifest_out")
 
     if not out_csv.exists():
         print(f"ERROR: mel manifest not found: {out_csv}", file=sys.stderr)

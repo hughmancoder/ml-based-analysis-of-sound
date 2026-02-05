@@ -17,6 +17,9 @@ import pandas as pd
 import soundfile as sf
 
 from preprocessing import load_audio_stereo, ensure_duration
+from utils.safe_paths import guard_path
+
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
 try:
     from tqdm import tqdm
@@ -186,8 +189,8 @@ def main():
     args = ap.parse_args()
 
     input_root = Path(args.input_dir)
-    cache_root = Path(args.cache_root).resolve()
-    manifest_out = Path(args.manifest_out)
+    cache_root = guard_path(Path(args.cache_root), PROJECT_ROOT, "cache_root")
+    manifest_out = guard_path(Path(args.manifest_out), PROJECT_ROOT, "manifest_out")
     project_root = Path(args.project_root).resolve()
 
     if not manifest_out.exists():

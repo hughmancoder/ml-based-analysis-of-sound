@@ -12,6 +12,9 @@ import numpy as np
 import yaml
 from tqdm import tqdm
 import soundfile as sf
+from utils.safe_paths import guard_path
+
+PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 
 from preprocessing import (
     calc_fft_hop,
@@ -286,15 +289,15 @@ def main() -> None:
         n_bins = max_bins
 
     train_dir = Path(args.train_dir or path_cfg["train_dir"])
-    mel_cache_root = Path(args.out_cache_root)
-    cqt_cache_root = Path(args.out_cqt_root)
+    mel_cache_root = guard_path(Path(args.out_cache_root), PROJECT_ROOT, "out_cache_root")
+    cqt_cache_root = guard_path(Path(args.out_cqt_root), PROJECT_ROOT, "out_cqt_root")
     out_csv = Path(args.out_manifest)
 
     ensure_dir(mel_cache_root)
     ensure_dir(cqt_cache_root)
     ensure_dir(out_csv.parent)
 
-    wav_out_dir = Path(args.wav_out_dir)
+    wav_out_dir = guard_path(Path(args.wav_out_dir), PROJECT_ROOT, "wav_out_dir")
     if args.save_wavs:
         wav_out_dir.mkdir(parents=True, exist_ok=True)
 

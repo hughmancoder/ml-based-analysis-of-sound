@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import argparse
+import os
 import csv
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from pathlib import Path
@@ -8,6 +9,7 @@ from typing import Iterable, Optional, Set, Tuple
 import yaml
 from tqdm import tqdm
 from preprocessing import precache_one
+from utils.safe_paths import guard_path
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 
@@ -122,7 +124,7 @@ def main() -> None:
     path_cfg = cfg["paths"]
 
     raw_dir = Path(args.train_dir or path_cfg["train_dir"])
-    cache_root = Path(path_cfg["cache_root"])
+    cache_root = guard_path(Path(path_cfg["cache_root"]), PROJECT_ROOT, "cache_root")
 
     if "manifest_path" in path_cfg:
         manifest_path = path_cfg["manifest_path"]
@@ -133,7 +135,7 @@ def main() -> None:
             "Missing manifest path in config. Expected 'manifest_path' or 'train_manifest' under 'paths'."
         )
 
-    out_csv = Path(manifest_path)
+    out_csv = guard_path(Path(manifest_path), PROJECT_ROOT, "manifest_path")
 
     # Load allowed labels
     allowed_labels = get_train_labels(cfg)
