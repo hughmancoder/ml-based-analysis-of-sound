@@ -241,6 +241,21 @@ def run_inference(
     valid_labels = [c.strip().lower() for c in ckpt[classes_key]]
     label_to_idx = {name: i for i, name in enumerate(valid_labels)}
 
+    if "in_ch" not in model_kwargs and "in_ch" in ckpt:
+        model_kwargs = {**model_kwargs, "in_ch": ckpt["in_ch"]}
+    if "freq_bins" not in model_kwargs:
+        if "freq_bins" in ckpt:
+            model_kwargs = {**model_kwargs, "freq_bins": ckpt["freq_bins"]}
+        else:
+            cqt_cap = _cap_cqt_bins(
+                audio_cfg["sr"],
+                audio_cfg["fmin"],
+                int(cqt_bins or audio_cfg.get("n_mels", 128)),
+                bins_per_octave,
+                audio_cfg.get("fmax"),
+            )
+            model_kwargs = {**model_kwargs, "freq_bins": min(int(audio_cfg.get("n_mels", 128)), cqt_cap)}
+
     model = model_cls(**model_kwargs, num_classes=len(valid_labels)).to(device)
     model.load_state_dict(ckpt[state_key], strict=strict_load)
     model.eval()

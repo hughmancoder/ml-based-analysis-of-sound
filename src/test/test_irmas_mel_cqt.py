@@ -12,7 +12,7 @@ from pathlib import Path
 
 import torch
 
-from src.models.CNN import CNN
+from src.models.CRNN import CRNN
 from src.test.utils import find_best_threshold, evaluate_multilabel_performance
 from src.test.utils_mel_cqt import run_inference
 
@@ -49,7 +49,7 @@ def main() -> None:
         weights_dir = (repo_root / "src" / "models" / "saved_weights" / args.weights_run).resolve()
         weights_path = weights_dir / "best_val.pt"
         if not weights_path.exists():
-            weights_path = weights_dir / "last.pt"
+            raise FileNotFoundError(f"Best checkpoint not found: {weights_path}")
 
     if not weights_path.exists():
         raise FileNotFoundError(f"Model weights not found: {weights_path}")
@@ -63,7 +63,7 @@ def main() -> None:
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     preds_arr, gts_arr, sample_ids, audio_cfg, valid_labels, label_to_idx = run_inference(
-        model_cls=CNN,
+        model_cls=CRNN,
         model_kwargs={"in_ch": 4},
         model_weights_path=weights_path,
         device=device,

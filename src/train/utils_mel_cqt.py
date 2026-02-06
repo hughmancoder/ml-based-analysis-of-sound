@@ -49,11 +49,24 @@ def get_device():
 
     return device, use_cuda_amp, use_mps_amp, scaler, pin_mem
 
-def build_model(num_classes: int, dropout: float, in_ch: int = 4, device: str = "cpu"):
-    """Instantiates the CNNVarTime model and moves it to the target device."""
-    from src.models.CNN import CNN 
-    model = CNN(in_ch=in_ch, num_classes=num_classes, p_drop=dropout)
+def build_model(num_classes: int, dropout: float, in_ch: int = 4, freq_bins: int = 128, device: str = "cpu"):
+    """Instantiates the CRNN model and moves it to the target device."""
+    from src.models.CRNN import CRNN
+    model = CRNN(in_ch=in_ch, num_classes=num_classes, p_drop=dropout, freq_bins=freq_bins)
     return model.to(device)
+
+def infer_input_shape(dataset) -> tuple[int, int]:
+    """Infer (in_ch, freq_bins) from the first dataset sample."""
+    if len(dataset) == 0:
+        raise ValueError("Dataset is empty; cannot infer input shape.")
+    sample_x, _ = dataset[0]
+    if not isinstance(sample_x, torch.Tensor):
+        sample_x = torch.as_tensor(sample_x)
+    if sample_x.dim() != 3:
+        raise ValueError(f"Expected sample shape (C, H, W), got {tuple(sample_x.shape)}")
+    in_ch = int(sample_x.shape[0])
+    freq_bins = int(sample_x.shape[1])
+    return in_ch, freq_bins
 
 # --- 2. Checkpointing & Data Handling ---
 def save_checkpoint(payload: Dict[str, Any], filepath: Path):
@@ -208,7 +221,27 @@ def multi_label_train_loop(
     train_loader = DataLoader(train_ds, batch_size=batch_size, shuffle=True, num_workers=num_workers, pin_memory=pin_mem, collate_fn=collate_fn_padd)
     val_loader = DataLoader(val_ds, batch_size=batch_size, shuffle=False, num_workers=num_workers, pin_memory=pin_mem, collate_fn=collate_fn_padd)
 
-    model = build_model(num_classes=len(classes), dropout=dropout, in_ch=in_ch, device=device)
+    inferred_in_ch, inferred_freq_bins = infer_input_shape(dataset)
+    model_in_ch = inferred_in_ch if in_ch is None else int(in_ch)
+    if model_in_ch != inferred_in_ch:
+        print(f"[WARN] Provided in_ch={model_in_ch} differs from dataset in_ch={inferred_in_ch}; using dataset value.")
+        model_in_ch = inferred_in_ch
+    model_freq_bins = inferred_freq_bins
+    if resume_from and resume_from.exists():
+        try:
+            ckpt_meta = torch.load(resume_from, map_location="cpu")
+            ckpt_in_ch = ckpt_meta.get("in_ch")
+            ckpt_freq_bins = ckpt_meta.get("freq_bins")
+            if ckpt_in_ch is not None and ckpt_in_ch != model_in_ch:
+                print(f"[WARN] Checkpoint in_ch={ckpt_in_ch} differs from dataset in_ch={model_in_ch}; using checkpoint.")
+                model_in_ch = ckpt_in_ch
+            if ckpt_freq_bins is not None and ckpt_freq_bins != model_freq_bins:
+                print(f"[WARN] Checkpoint freq_bins={ckpt_freq_bins} differs from dataset freq_bins={model_freq_bins}; using checkpoint.")
+                model_freq_bins = ckpt_freq_bins
+        except Exception as exc:
+            print(f"[WARN] Failed to read checkpoint metadata: {exc}")
+
+    model = build_model(num_classes=len(classes), dropout=dropout, in_ch=model_in_ch, freq_bins=model_freq_bins, device=device)
     optimizer = torch.optim.AdamW(model.parameters(), lr=lr, weight_decay=weight_decay)
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=epochs)
     criterion = nn.BCEWithLogitsLoss()
@@ -245,7 +278,8 @@ def multi_label_train_loop(
             "audio_config": audio_cfg,
             "label_to_idx": dataset.label_to_idx,
             "feature_mode": "mel_cqt",
-            "in_ch": in_ch,
+            "in_ch": model_in_ch,
+            "freq_bins": model_freq_bins,
         }
         save_checkpoint(payload, ckpt_dir / "last.pt")
 
