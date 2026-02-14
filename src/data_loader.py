@@ -2,7 +2,23 @@ import torch
 import numpy as np
 import pandas as pd
 from pathlib import Path
+from typing import Optional
 from torch.utils.data import Dataset
+
+
+def _read_csv_with_fallback(path: Path) -> pd.DataFrame:
+    encodings = ("utf-8", "utf-8-sig", "gbk", "cp936")
+    last_err: Optional[UnicodeDecodeError] = None
+    for enc in encodings:
+        try:
+            return pd.read_csv(path, encoding=enc)
+        except UnicodeDecodeError as e:
+            last_err = e
+    if last_err is not None:
+        raise ValueError(
+            f"Failed to decode CSV: {path} with encodings {encodings}"
+        ) from last_err
+    return pd.read_csv(path)
 
 class MultiLabelMelDataset(Dataset):
     def __init__(
@@ -17,10 +33,10 @@ class MultiLabelMelDataset(Dataset):
         if isinstance(manifest_csv, (list, tuple, set)):
             if not manifest_csv:
                 raise ValueError("manifest_csv list is empty")
-            frames = [pd.read_csv(path) for path in manifest_csv]
+            frames = [_read_csv_with_fallback(Path(path)) for path in manifest_csv]
             df = pd.concat(frames, ignore_index=True)
         else:
-            df = pd.read_csv(manifest_csv)
+            df = _read_csv_with_fallback(Path(manifest_csv))
 
         # ---- Canonicalise label column ----
         # Prefer 'labels' (multilabel) but fall back to 'label' (single-label)

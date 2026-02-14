@@ -4,7 +4,7 @@ Generates IRMAS-congruent dataset clips from a minimal JSON manifest
 """
 
 from __future__ import annotations
-import argparse, json, math, re, shutil, subprocess as sp
+import argparse, json, math, os, re, shutil, subprocess as sp
 from dataclasses import dataclass
 from pathlib import Path
 from typing import List, Dict, Any, Optional
@@ -49,6 +49,16 @@ def which(name: str) -> bool:
 
 def ensure_dir(p: Path) -> None:
     p.mkdir(parents=True, exist_ok=True)
+
+def guard_path(p: Path, repo_root: Path, allow_unsafe: bool, label: str) -> Path:
+    p = p.expanduser().resolve()
+    if allow_unsafe:
+        return p
+    if p.parent == p:
+        raise SystemExit(f"[fatal] Refusing {label} at drive root: {p}")
+    if repo_root not in p.parents and p != repo_root:
+        raise SystemExit(f"[fatal] Refusing {label} outside repo: {p} (use --allow-unsafe-paths to override)")
+    return p
 
 @dataclass
 class MediaSource:
@@ -241,6 +251,8 @@ def main() -> None:
                     help="Length of each output clip in seconds")
     ap.add_argument("--stride-sec", type=float, default=None,
                     help="Step between clip start times; defaults to clip length")
+    ap.add_argument("--allow-unsafe-paths", action="store_true",
+                    help="Allow output/cache dirs outside repo root")
     args = ap.parse_args()
 
     if not which("ffmpeg") or not which("ffprobe"):
@@ -250,10 +262,11 @@ def main() -> None:
     entries: List[Dict[str, Any]] = json.loads(manifest_path.read_text(encoding="utf-8"))
 
     global OUT_ROOT, TMP_DIR, CANON_DIR, REPO_ROOT, SR, CHANNELS, CLIP_SEC, STRIDE_SEC
-    OUT_ROOT = args.out_root.expanduser()
-    TMP_DIR = args.tmp_dir.expanduser()
-    CANON_DIR = args.canon_dir.expanduser()
-    REPO_ROOT = args.repo_root.expanduser()
+    REPO_ROOT = args.repo_root.expanduser().resolve()
+    allow_unsafe = args.allow_unsafe_paths or os.environ.get("ALLOW_UNSAFE_PATHS") == "1"
+    OUT_ROOT = guard_path(args.out_root, REPO_ROOT, allow_unsafe, "out-root")
+    TMP_DIR = guard_path(args.tmp_dir, REPO_ROOT, allow_unsafe, "tmp-dir")
+    CANON_DIR = guard_path(args.canon_dir, REPO_ROOT, allow_unsafe, "canon-dir")
     SR = args.sample_rate
     CHANNELS = args.channels
     CLIP_SEC = args.clip_sec

@@ -33,13 +33,13 @@ def get_device():
     """Detects the best available device (CUDA, MPS, or CPU)."""
     use_cuda_amp = False
     use_mps_amp = False
-    scaler = torch.cuda.amp.GradScaler(enabled=False)
+    scaler = torch.amp.GradScaler("cuda", enabled=False)
     pin_mem = False
 
     if torch.cuda.is_available():
         device = "cuda"
         use_cuda_amp = True
-        scaler = torch.cuda.amp.GradScaler(enabled=True)
+        scaler = torch.amp.GradScaler("cuda", enabled=True)
         pin_mem = True
     elif torch.backends.mps.is_available():
         device = "mps"
@@ -49,12 +49,24 @@ def get_device():
 
     return device, use_cuda_amp, use_mps_amp, scaler, pin_mem
 
-def build_model(num_classes: int, dropout: float, in_ch: int = 2, device: str = "cpu"):
-    """Instantiates the CNNVarTime model and moves it to the target device."""
-    # Importing inside function to avoid circular imports if CNNVarTime is in a separate file
-    from src.models.CNN import CNN 
-    model = CNN(in_ch=in_ch, num_classes=num_classes, p_drop=dropout)
+def build_model(num_classes: int, dropout: float, in_ch: int = 2, freq_bins: int = 128, device: str = "cpu"):
+    """Instantiates the CRNN model and moves it to the target device."""
+    from src.models.CRNN import CRNN
+    model = CRNN(in_ch=in_ch, num_classes=num_classes, p_drop=dropout, freq_bins=freq_bins)
     return model.to(device)
+
+def infer_input_shape(dataset) -> tuple[int, int]:
+    """Infer (in_ch, freq_bins) from the first dataset sample."""
+    if len(dataset) == 0:
+        raise ValueError("Dataset is empty; cannot infer input shape.")
+    sample_x, _ = dataset[0]
+    if not isinstance(sample_x, torch.Tensor):
+        sample_x = torch.as_tensor(sample_x)
+    if sample_x.dim() != 3:
+        raise ValueError(f"Expected sample shape (C, H, W), got {tuple(sample_x.shape)}")
+    in_ch = int(sample_x.shape[0])
+    freq_bins = int(sample_x.shape[1])
+    return in_ch, freq_bins
 
 # --- 2. Checkpointing & Data Handling ---
 def save_checkpoint(payload: Dict[str, Any], filepath: Path):
@@ -128,7 +140,7 @@ def train_one_epoch_multi(model, loader, criterion, optimizer, scaler, device, u
         optimizer.zero_grad(set_to_none=True)
 
         # Handle Mixed Precision
-        context = torch.cuda.amp.autocast() if use_cuda_amp else \
+        context = torch.amp.autocast("cuda") if use_cuda_amp else \
                   (torch.autocast(device_type="mps", dtype=torch.float16) if use_mps_amp else torch.enable_grad())
         
         with context:
@@ -162,7 +174,7 @@ def evaluate_multi(model, loader, criterion, device, use_cuda_amp, use_mps_amp, 
         for X, y in loader:
             X, y = X.to(device, non_blocking=pin_mem), y.to(device, non_blocking=pin_mem)
             
-            context = torch.cuda.amp.autocast() if use_cuda_amp else \
+            context = torch.amp.autocast("cuda") if use_cuda_amp else \
                       (torch.autocast(device_type="mps", dtype=torch.float16) if use_mps_amp else torch.no_grad())
             
             with context:
@@ -211,7 +223,24 @@ def multi_label_train_loop(
     train_loader = DataLoader(train_ds, batch_size=batch_size, shuffle=True, num_workers=num_workers, pin_memory=pin_mem, collate_fn=collate_fn_padd)
     val_loader = DataLoader(val_ds, batch_size=batch_size, shuffle=False, num_workers=num_workers, pin_memory=pin_mem, collate_fn=collate_fn_padd)
 
-    model = build_model(num_classes=len(classes), dropout=dropout, device=device)
+    inferred_in_ch, inferred_freq_bins = infer_input_shape(dataset)
+    model_in_ch = inferred_in_ch
+    model_freq_bins = inferred_freq_bins
+    if resume_from and resume_from.exists():
+        try:
+            ckpt_meta = torch.load(resume_from, map_location="cpu")
+            ckpt_in_ch = ckpt_meta.get("in_ch")
+            ckpt_freq_bins = ckpt_meta.get("freq_bins")
+            if ckpt_in_ch is not None and ckpt_in_ch != model_in_ch:
+                print(f"[WARN] Checkpoint in_ch={ckpt_in_ch} differs from dataset in_ch={model_in_ch}; using checkpoint.")
+                model_in_ch = ckpt_in_ch
+            if ckpt_freq_bins is not None and ckpt_freq_bins != model_freq_bins:
+                print(f"[WARN] Checkpoint freq_bins={ckpt_freq_bins} differs from dataset freq_bins={model_freq_bins}; using checkpoint.")
+                model_freq_bins = ckpt_freq_bins
+        except Exception as exc:
+            print(f"[WARN] Failed to read checkpoint metadata: {exc}")
+
+    model = build_model(num_classes=len(classes), dropout=dropout, in_ch=model_in_ch, freq_bins=model_freq_bins, device=device)
     optimizer = torch.optim.AdamW(model.parameters(), lr=lr, weight_decay=weight_decay)
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=epochs)
     criterion = nn.BCEWithLogitsLoss() # This treats each instrument as an independent binary classification task.
@@ -247,7 +276,10 @@ def multi_label_train_loop(
             "best_val_micro_f1": best_val_f1,
             "classes": classes,            # List of instrument names in order
             "audio_config": audio_cfg,     # sr, n_mels, hop_ms, etc.
-            "label_to_idx": dataset.label_to_idx
+            "label_to_idx": dataset.label_to_idx,
+            "feature_mode": "mel",
+            "in_ch": model_in_ch,
+            "freq_bins": model_freq_bins,
         }
         save_checkpoint(payload, ckpt_dir / "last.pt")
 

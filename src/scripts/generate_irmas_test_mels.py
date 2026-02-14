@@ -27,6 +27,9 @@ from utils.mel_utils import (
     _stereo_to_mel,
     _safe_relpath,
 )
+from utils.safe_paths import guard_path
+
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
 
 def main():
@@ -49,8 +52,8 @@ def main():
     args = ap.parse_args()
 
     input_root   = Path(args.input_dir)
-    cache_root   = Path(args.cache_root).resolve()
-    manifest_out = Path(args.manifest_out)
+    cache_root = guard_path(Path(args.cache_root), PROJECT_ROOT, "cache_root")
+    manifest_out = guard_path(Path(args.manifest_out), PROJECT_ROOT, "manifest_out")
     project_root = Path(args.project_root).resolve()
 
     cache_root.mkdir(parents=True, exist_ok=True)
@@ -111,7 +114,7 @@ def main():
             print(f"[WARN] Failed {wav_path}: {e}", file=sys.stderr)
             traceback.print_exc(file=sys.stderr)
 
-    with open(manifest_out, "w", newline="") as f:
+    with open(manifest_out, "w", newline="", encoding="utf-8") as f:
         writer = csv.writer(f)
         writer.writerow(["filepath", "labels", "filename", "start_ms", "dataset"])
         writer.writerows(rows)

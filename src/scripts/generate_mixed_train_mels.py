@@ -2,6 +2,7 @@
 import argparse
 import csv
 import random
+from concurrent.futures import ProcessPoolExecutor, as_completed
 from pathlib import Path
 from typing import Dict, List, Optional, Set, Tuple
 
@@ -9,6 +10,9 @@ import numpy as np
 import yaml
 from tqdm import tqdm
 import soundfile as sf  # <-- needed for saving wavs
+from utils.safe_paths import guard_path
+
+PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 
 # Reuse your existing preprocessing utilities
 from preprocessing import (
@@ -21,7 +25,7 @@ from preprocessing import (
 
 
 def load_yaml(path: Path) -> dict:
-    with open(path, "r") as f:
+    with open(path, "r", encoding="utf-8") as f:
         return yaml.safe_load(f) or {}
 
 
@@ -121,6 +125,98 @@ def save_mixed_npy(
     return out_path
 
 
+_G_BY_LABEL: Dict[str, List[Path]] = {}
+_G_LABELS: List[str] = []
+_G_AUDIO: Dict[str, object] = {}
+_G_SNR_RANGE: Tuple[float, float] = (0.0, 0.0)
+_G_SAVE_WAVS: bool = False
+_G_WAV_OUT_DIR: Optional[Path] = None
+_G_MAX_WAVS: int = 0
+_G_MIN_SOURCES: int = 2
+_G_MAX_SOURCES: int = 2
+_G_SEED: int = 1337
+
+
+def _init_worker(
+    by_label: Dict[str, List[Path]],
+    labels: List[str],
+    audio_cfg: Dict[str, object],
+    snr_range: Tuple[float, float],
+    save_wavs: bool,
+    wav_out_dir: Optional[Path],
+    max_wavs: int,
+    min_sources: int,
+    max_sources: int,
+    seed: int,
+):
+    global _G_BY_LABEL, _G_LABELS, _G_AUDIO, _G_SNR_RANGE, _G_SAVE_WAVS, _G_WAV_OUT_DIR
+    global _G_MAX_WAVS, _G_MIN_SOURCES, _G_MAX_SOURCES, _G_SEED
+    _G_BY_LABEL = by_label
+    _G_LABELS = labels
+    _G_AUDIO = audio_cfg
+    _G_SNR_RANGE = snr_range
+    _G_SAVE_WAVS = save_wavs
+    _G_WAV_OUT_DIR = wav_out_dir
+    _G_MAX_WAVS = max_wavs
+    _G_MIN_SOURCES = min_sources
+    _G_MAX_SOURCES = max_sources
+    _G_SEED = seed
+
+
+def _mix_one(idx: int):
+    try:
+        random.seed(_G_SEED + idx)
+        np.random.seed(_G_SEED + idx)
+
+        k = random.randint(_G_MIN_SOURCES, _G_MAX_SOURCES)
+        chosen_labels = random.sample(_G_LABELS, k)
+        chosen_paths = [random.choice(_G_BY_LABEL[lab]) for lab in chosen_labels]
+
+        stereos = []
+        for p in chosen_paths:
+            stereo = load_audio_stereo(p, target_sr=int(_G_AUDIO["sr"]))
+            stereo = ensure_duration(stereo, int(_G_AUDIO["sr"]), float(_G_AUDIO["dur"]))
+            stereos.append(stereo)
+
+        mixed_stereo = mix_stereo_waveforms(stereos, snr_db_range=_G_SNR_RANGE)
+
+        if _G_SAVE_WAVS and _G_WAV_OUT_DIR is not None and idx < _G_MAX_WAVS:
+            labels_tag = "_".join(chosen_labels)
+            wav_path = _G_WAV_OUT_DIR / f"mix_{idx:06d}__[{labels_tag}]__sr{int(_G_AUDIO['sr'])}.wav"
+            sf.write(str(wav_path), mixed_stereo.T, int(_G_AUDIO["sr"]), subtype="PCM_16")
+            (_G_WAV_OUT_DIR / f"mix_{idx:06d}__[{labels_tag}].txt").write_text(
+                "\n".join(chosen_labels) + "\n",
+                encoding="utf-8",
+            )
+
+        mel = mel_stereo2_from_stereo(
+            mixed_stereo,
+            sr=int(_G_AUDIO["sr"]),
+            n_fft=int(_G_AUDIO["n_fft"]),
+            hop=int(_G_AUDIO["hop"]),
+            win_length=int(_G_AUDIO["win_length"]),
+            n_mels=int(_G_AUDIO["n_mels"]),
+            fmin=float(_G_AUDIO["fmin"]),
+            fmax=_G_AUDIO.get("fmax"),
+        )
+
+        npy_path = save_mixed_npy(
+            cache_root=Path(_G_AUDIO["cache_root"]),
+            labels=chosen_labels,
+            idx=idx,
+            sr=int(_G_AUDIO["sr"]),
+            dur=float(_G_AUDIO["dur"]),
+            n_mels=int(_G_AUDIO["n_mels"]),
+            win_ms=float(_G_AUDIO["win_ms"]),
+            hop_ms=float(_G_AUDIO["hop_ms"]),
+            mel=mel,
+        )
+
+        return True, idx, npy_path, "|".join(chosen_labels), None
+    except Exception as e:
+        return False, idx, None, None, str(e)
+
+
 def main() -> None:
     ap = argparse.ArgumentParser(description="Generate synthetic multilabel mixed mels from wavs")
     ap.add_argument("--config", default="configs/audio_params.yaml")
@@ -134,6 +230,7 @@ def main() -> None:
     ap.add_argument("--snr_db_min", type=float, default=-5.0)
     ap.add_argument("--snr_db_max", type=float, default=10.0)
     ap.add_argument("--seed", type=int, default=1337)
+    ap.add_argument("--num_workers", type=int, default=19)
 
     # Debug wav dumping
     ap.add_argument("--save_wavs", action="store_true")
@@ -158,13 +255,13 @@ def main() -> None:
     fmax = audio_cfg.get("fmax")
 
     train_dir = Path(args.train_dir or path_cfg["train_dir"])
-    cache_root = Path(args.out_cache_root)
+    cache_root = guard_path(Path(args.out_cache_root), PROJECT_ROOT, "out_cache_root")
     out_csv = Path(args.out_manifest)
 
     ensure_dir(cache_root)
     ensure_dir(out_csv.parent)
 
-    wav_out_dir = Path(args.wav_out_dir)
+    wav_out_dir = guard_path(Path(args.wav_out_dir), PROJECT_ROOT, "wav_out_dir")
     if args.save_wavs:
         wav_out_dir.mkdir(parents=True, exist_ok=True)
 
@@ -208,60 +305,67 @@ def main() -> None:
     if args.save_wavs:
         print(f"Debug WAVs: saving first {args.max_wavs} mixes to {wav_out_dir}")
 
-    rows_out: List[List[str]] = []
+    audio_worker_cfg = {
+        "sr": sr,
+        "dur": dur,
+        "n_mels": n_mels,
+        "win_ms": win_ms,
+        "hop_ms": hop_ms,
+        "fmin": fmin,
+        "fmax": fmax,
+        "n_fft": n_fft,
+        "hop": hop,
+        "win_length": win_length,
+        "cache_root": cache_root,
+    }
 
-    for i in tqdm(range(args.num_mixes), desc="Mixing"):
-        k = random.randint(args.min_sources, args.max_sources)
-        chosen_labels = random.sample(labels, k)
-        chosen_paths = [random.choice(by_label[lab]) for lab in chosen_labels]
+    num_workers = max(1, int(args.num_workers or 1))
+    rows_out_by_idx: Dict[int, List[str]] = {}
+    n_ok, n_fail = 0, 0
 
-        # Load + duration-fix each source (reusing your functions)
-        stereos = []
-        for p in chosen_paths:
-            stereo = load_audio_stereo(p, target_sr=sr)  # (2, T)
-            stereo = ensure_duration(stereo, sr, dur)     # (2, target_T)
-            stereos.append(stereo)
+    init_args = (
+        by_label,
+        labels,
+        audio_worker_cfg,
+        snr_range,
+        args.save_wavs,
+        wav_out_dir if args.save_wavs else None,
+        args.max_wavs,
+        args.min_sources,
+        args.max_sources,
+        args.seed,
+    )
 
-        mixed_stereo = mix_stereo_waveforms(stereos, snr_db_range=snr_range)
+    if num_workers == 1:
+        _init_worker(*init_args)
+        for i in tqdm(range(args.num_mixes), desc="Mixing"):
+            ok, idx, npy_path, labels_joined, err = _mix_one(i)
+            if ok:
+                rows_out_by_idx[idx] = [npy_path.resolve().as_posix(), labels_joined]
+                n_ok += 1
+            else:
+                n_fail += 1
+                print(f"[WARN] Failed mix {idx}: {err}")
+    else:
+        with ProcessPoolExecutor(max_workers=num_workers, initializer=_init_worker, initargs=init_args) as executor:
+            futures = [executor.submit(_mix_one, i) for i in range(args.num_mixes)]
+            try:
+                for fut in tqdm(as_completed(futures), total=len(futures), desc="Mixing"):
+                    ok, idx, npy_path, labels_joined, err = fut.result()
+                    if ok:
+                        rows_out_by_idx[idx] = [npy_path.resolve().as_posix(), labels_joined]
+                        n_ok += 1
+                    else:
+                        n_fail += 1
+                        print(f"[WARN] Failed mix {idx}: {err}")
+            except KeyboardInterrupt:
+                print("\nStopped by user.")
+                for fut in futures:
+                    fut.cancel()
 
-        # Save debug WAV + label sidecar (INSIDE THE LOOP)
-        if args.save_wavs and i < args.max_wavs:
-            wav_path = wav_out_dir / f"mix_{i:06d}__[{'_'.join(chosen_labels)}]__sr{sr}.wav"
-            sf.write(str(wav_path), mixed_stereo.T, sr, subtype="PCM_16")
+    rows_out = [rows_out_by_idx[i] for i in sorted(rows_out_by_idx)]
 
-            (wav_out_dir / f"mix_{i:06d}__[{'_'.join(chosen_labels)}].txt").write_text(
-                "\n".join(chosen_labels) + "\n",
-                encoding="utf-8",
-            )
-
-        # Compute mel using your existing function
-        mel = mel_stereo2_from_stereo(
-            mixed_stereo,
-            sr=sr,
-            n_fft=n_fft,
-            hop=hop,
-            win_length=win_length,
-            n_mels=n_mels,
-            fmin=fmin,
-            fmax=fmax,
-        )  # (2, n_mels, T')
-
-        npy_path = save_mixed_npy(
-            cache_root=cache_root,
-            labels=chosen_labels,
-            idx=i,
-            sr=sr,
-            dur=dur,
-            n_mels=n_mels,
-            win_ms=win_ms,
-            hop_ms=hop_ms,
-            mel=mel,
-        )
-
-        # multilabel manifest format: labels joined by |
-        rows_out.append([npy_path.resolve().as_posix(), "|".join(chosen_labels)])
-
-    with open(out_csv, "w", newline="") as f:
+    with open(out_csv, "w", newline="", encoding="utf-8") as f:
         w = csv.writer(f)
         w.writerow(["filepath", "labels"])
         w.writerows(rows_out)

@@ -1,18 +1,21 @@
 #!/usr/bin/env python3
 import argparse
-import yaml
+import os
 import csv
+from concurrent.futures import ProcessPoolExecutor, as_completed
 from pathlib import Path
 from typing import Iterable, Optional, Set, Tuple
 
+import yaml
 from tqdm import tqdm
 from preprocessing import precache_one
+from utils.safe_paths import guard_path
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 
 
 def load_yaml(path: Path) -> dict:
-    with open(path, "r") as f:
+    with open(path, "r", encoding="utf-8") as f:
         return yaml.safe_load(f) or {}
 
 
@@ -79,11 +82,36 @@ def _iter_wavs_from_train_dir(
         yield wav, label
 
 
+def _process_one(
+    wav_path: Path,
+    label: str,
+    cache_root: Path,
+    audio_cfg: dict,
+):
+    try:
+        npy_path = precache_one(
+            wav_path,
+            label,
+            cache_root,
+            sr=audio_cfg["sr"],
+            dur=audio_cfg["duration"],
+            n_mels=audio_cfg["n_mels"],
+            win_ms=audio_cfg["win_ms"],
+            hop_ms=audio_cfg["hop_ms"],
+            fmin=audio_cfg["fmin"],
+            fmax=audio_cfg.get("fmax"),
+        )
+        return True, npy_path, label, wav_path, None
+    except Exception as e:
+        return False, None, label, wav_path, str(e)
+
+
 def main() -> None:
     ap = argparse.ArgumentParser(description="Precompute Mel Spectrograms into .npy files")
     ap.add_argument("--config", default="configs/audio_params.yaml", help="Path to YAML config")
     ap.add_argument("--labels_file", help="Optional YAML containing train_labels allow-list")
     ap.add_argument("--train_dir", help="Override the raw data source directory")
+    ap.add_argument("--num_workers", type=int, default=19)
     ap.add_argument(
         "--no_enforce_one_level",
         action="store_true",
@@ -96,7 +124,7 @@ def main() -> None:
     path_cfg = cfg["paths"]
 
     raw_dir = Path(args.train_dir or path_cfg["train_dir"])
-    cache_root = Path(path_cfg["cache_root"])
+    cache_root = guard_path(Path(path_cfg["cache_root"]), PROJECT_ROOT, "cache_root")
 
     if "manifest_path" in path_cfg:
         manifest_path = path_cfg["manifest_path"]
@@ -107,7 +135,7 @@ def main() -> None:
             "Missing manifest path in config. Expected 'manifest_path' or 'train_manifest' under 'paths'."
         )
 
-    out_csv = Path(manifest_path)
+    out_csv = guard_path(Path(manifest_path), PROJECT_ROOT, "manifest_path")
 
     # Load allowed labels
     allowed_labels = get_train_labels(cfg)
@@ -153,33 +181,46 @@ def main() -> None:
         if extra:
             print(f"INFO: These labels exist on disk but will be skipped: {extra}")
 
-    for wav_path, label in tqdm(pairs, desc="Generating Mels"):
-        try:
-            npy_path = precache_one(
-                wav_path,
-                label,
-                cache_root,
-                sr=audio_cfg["sr"],
-                dur=audio_cfg["duration"],
-                n_mels=audio_cfg["n_mels"],
-                win_ms=audio_cfg["win_ms"],
-                hop_ms=audio_cfg["hop_ms"],
-                fmin=audio_cfg["fmin"],
-                fmax=audio_cfg.get("fmax"),
-            )
+    num_workers = max(1, int(args.num_workers or 1))
 
-            rel_path = npy_path.resolve().as_posix()
-            rows_out.append([rel_path, label, wav_path.resolve().as_posix()])
-            n_ok += 1
+    if num_workers == 1:
+        for wav_path, label in tqdm(pairs, desc="Generating Mels"):
+            try:
+                ok, npy_path, label, wav_path, err = _process_one(
+                    wav_path, label, cache_root, audio_cfg
+                )
+                if ok:
+                    rel_path = npy_path.resolve().as_posix()
+                    rows_out.append([rel_path, label, wav_path.resolve().as_posix()])
+                    n_ok += 1
+                else:
+                    print("INFO: Failed to process:", wav_path, "Error:", err)
+                    n_fail += 1
+            except KeyboardInterrupt:
+                print("\nStopped by user.")
+                break
+    else:
+        with ProcessPoolExecutor(max_workers=num_workers) as executor:
+            futures = [
+                executor.submit(_process_one, wav_path, label, cache_root, audio_cfg)
+                for wav_path, label in pairs
+            ]
+            try:
+                for fut in tqdm(as_completed(futures), total=len(futures), desc="Generating Mels"):
+                    ok, npy_path, label, wav_path, err = fut.result()
+                    if ok:
+                        rel_path = npy_path.resolve().as_posix()
+                        rows_out.append([rel_path, label, wav_path.resolve().as_posix()])
+                        n_ok += 1
+                    else:
+                        print("INFO: Failed to process:", wav_path, "Error:", err)
+                        n_fail += 1
+            except KeyboardInterrupt:
+                print("\nStopped by user.")
+                for fut in futures:
+                    fut.cancel()
 
-        except KeyboardInterrupt:
-            print("\nStopped by user.")
-            break
-        except Exception as e:
-            print("INFO: Failed to process:", wav_path, "Error:", e)
-            n_fail += 1
-
-    with open(out_csv, "w", newline="") as f:
+    with open(out_csv, "w", newline="", encoding="utf-8") as f:
         w = csv.writer(f)
         w.writerow(["filepath", "label", "wavpath"])
         w.writerows(rows_out)

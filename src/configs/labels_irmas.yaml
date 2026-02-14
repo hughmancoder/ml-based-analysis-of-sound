@@ -1,0 +1,13 @@
+# IRMAS instrument codes (single-label dataset, used as train_labels)
+train_labels:
+  - cel
+  - cla
+  - flu
+  - gac
+  - gel
+  - org
+  - pia
+  - sax
+  - tru
+  - vio
+  - voi

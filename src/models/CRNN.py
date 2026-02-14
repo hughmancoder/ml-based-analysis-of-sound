@@ -2,11 +2,13 @@ import torch
 import torch.nn as nn
 
 class CRNN(nn.Module):
-    def __init__(self, num_classes, p_drop=0.3):
+    def __init__(self, num_classes, p_drop=0.3, in_ch=2, freq_bins: int = 128):
         super().__init__()
+        if freq_bins <= 0:
+            raise ValueError(f"freq_bins must be > 0, got {freq_bins}")
         # 1. Feature Extraction (CNN)
         self.conv_block = nn.Sequential(
-            nn.Conv2d(2, 32, kernel_size=3, padding=1),
+            nn.Conv2d(in_ch, 32, kernel_size=3, padding=1),
             nn.BatchNorm2d(32),
             nn.ReLU(),
             nn.MaxPool2d(2, 2), # Reduce freq/time
@@ -18,9 +20,9 @@ class CRNN(nn.Module):
         )
         
         # 2. Sequence Learning (RNN)
-        # Assuming input H=128, two MaxPools (2x2) make H=32. 
-        # CNN output channels = 64. So input to GRU is 32 * 64.
-        self.gru = nn.GRU(input_size=32 * 64, hidden_size=128, 
+        # Two MaxPools (2x2) reduce H by factor of 4 (floor).
+        h_out = max(1, int(freq_bins) // 4)
+        self.gru = nn.GRU(input_size=h_out * 64, hidden_size=128, 
                           num_layers=2, batch_first=True, bidirectional=True)
         
         # 3. Classification

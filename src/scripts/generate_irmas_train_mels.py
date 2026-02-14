@@ -28,6 +28,7 @@ from utils.mel_utils import (
     _safe_relpath,
     precache_one,
 )
+from utils.safe_paths import guard_path
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
@@ -53,13 +54,23 @@ def _iter_wavs_from_train_dir(root: Path) -> Iterable[Tuple[Path, str]]:
 def _iter_wavs_from_manifest_csv(manifest_csv: Path) -> Iterable[Tuple[Path, str]]:
     if not manifest_csv.exists():
         raise FileNotFoundError(f"--manifest_csv not found: {manifest_csv}")
-    df = pd.read_csv(manifest_csv)
+    df = _read_csv_with_fallback(manifest_csv)
     df = df.rename(columns={c: c.lower() for c in df.columns})
     if not {"filepath", "label"}.issubset(df.columns):
         raise ValueError("manifest must have columns: filepath,label")
     df["label"] = df["label"].astype(str).str.strip().str.lower()
     for _, row in df.iterrows():
         yield Path(row["filepath"]), str(row["label"])
+
+
+def _read_csv_with_fallback(path: Path) -> pd.DataFrame:
+    encodings = ("utf-8", "utf-8-sig", "gbk", "cp936")
+    for enc in encodings:
+        try:
+            return pd.read_csv(path, encoding=enc)
+        except UnicodeDecodeError:
+            continue
+    return pd.read_csv(path)
 
 def main():
     ap = argparse.ArgumentParser(
@@ -75,7 +86,7 @@ def main():
 
     # Kept for CLI compatibility (not used directly here)
     ap.add_argument("--batch_size", type=int, default=64)
-    ap.add_argument("--workers", type=int, default=8)
+    ap.add_argument("--workers", type=int, default=19)
 
     # Mel params (must match your training pipeline)
     ap.add_argument("--sr", type=int, default=44100)
@@ -88,8 +99,8 @@ def main():
 
     args = ap.parse_args()
 
-    cache_root   = Path(args.cache_root)
-    out_csv      = Path(args.mel_manifest_out)
+    cache_root = guard_path(Path(args.cache_root), PROJECT_ROOT, "cache_root")
+    out_csv = guard_path(Path(args.mel_manifest_out), PROJECT_ROOT, "mel_manifest_out")
 
     # Decide input mode
     mode = None
@@ -124,7 +135,7 @@ def main():
             traceback.print_exc(file=sys.stderr)
 
     out_csv.parent.mkdir(parents=True, exist_ok=True)
-    with open(out_csv, "w", newline="") as f:
+    with open(out_csv, "w", newline="", encoding="utf-8") as f:
         w = csv.writer(f)
         w.writerow(["filepath", "label"])
         w.writerows(rows_out)

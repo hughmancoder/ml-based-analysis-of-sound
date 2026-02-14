@@ -8,6 +8,26 @@ import matplotlib.pyplot as plt
 from tqdm import tqdm
 from src.preprocessing import calc_fft_hop, ensure_duration, load_audio_stereo, mel_stereo2_from_stereo
 
+
+def _read_csv_with_fallback(path: Path) -> pd.DataFrame:
+    encodings = ("utf-8", "utf-8-sig", "gbk", "cp936")
+    for enc in encodings:
+        try:
+            return pd.read_csv(path, encoding=enc)
+        except UnicodeDecodeError:
+            continue
+    return pd.read_csv(path)
+
+
+def _read_text_with_fallback(path: Path) -> str:
+    encodings = ("utf-8", "utf-8-sig", "gbk", "cp936")
+    for enc in encodings:
+        try:
+            return path.read_text(encoding=enc)
+        except UnicodeDecodeError:
+            continue
+    return path.read_text(encoding="utf-8", errors="ignore")
+
 def parse_ground_truth(txt_path, label_to_idx):
     """
     Parses text files. Handles newlines, tabs, and commas. 
@@ -18,8 +38,7 @@ def parse_ground_truth(txt_path, label_to_idx):
     if not path.exists():
         return gt_vector
 
-    with open(path, 'r') as f:
-        content = f.read()
+    content = _read_text_with_fallback(path)
     
     # Regex split handles \n, \t, and commas simultaneously
     raw_labels = re.split(r'[\n,\t]', content)
@@ -157,11 +176,16 @@ def run_inference(
     valid_labels = [c.strip().lower() for c in ckpt[classes_key]]
     label_to_idx = {name: i for i, name in enumerate(valid_labels)}
 
+    if "in_ch" not in model_kwargs and "in_ch" in ckpt:
+        model_kwargs = {**model_kwargs, "in_ch": ckpt["in_ch"]}
+    if "freq_bins" not in model_kwargs:
+        model_kwargs = {**model_kwargs, "freq_bins": ckpt.get("freq_bins", audio_cfg.get("n_mels", 128))}
+
     model = model_cls(**model_kwargs, num_classes=len(valid_labels)).to(device)
     model.load_state_dict(ckpt[state_key], strict=strict_load)
     model.eval()
 
-    df = pd.read_csv(test_manifest_csv)
+    df = _read_csv_with_fallback(Path(test_manifest_csv))
 
     def _resolve_path(p):
         p = Path(p)
@@ -178,11 +202,18 @@ def run_inference(
     if show_progress:
         iterator = tqdm(iterator, total=len(df))
 
+    n_fail = 0
     with torch.no_grad():
         for _, row in iterator:
-            gt_vec = parse_ground_truth(row["txt_path"], label_to_idx)
-            mel = load_and_preprocess(row["wav_path"], audio_cfg)
-            probs = get_prediction(model, mel, device)
+            try:
+                gt_vec = parse_ground_truth(row["txt_path"], label_to_idx)
+                mel = load_and_preprocess(row["wav_path"], audio_cfg)
+                probs = get_prediction(model, mel, device)
+            except Exception as exc:
+                n_fail += 1
+                if n_fail <= 10:
+                    print(f"[WARN] Skipping unreadable sample: {row['wav_path']} ({exc})")
+                continue
 
             all_preds.append(probs)
             all_gt.append(gt_vec)
@@ -191,4 +222,105 @@ def run_inference(
     preds_arr = np.asarray(all_preds)
     gts_arr = np.asarray(all_gt)
 
+    if n_fail:
+        print(f"[WARN] Skipped {n_fail} samples due to read/preprocess errors.")
+
     return preds_arr, gts_arr, sample_ids, audio_cfg, valid_labels, label_to_idx
+
+
+def evaluate_multilabel_performance(
+    all_preds,
+    all_gt,
+    class_list,
+    sample_ids=None,
+    threshold=0.5,
+    debug=False,
+    zero_division=0,
+):
+    classes = [c.strip().lower() for c in class_list]
+    probs = np.asarray(all_preds)
+    gts = np.asarray(all_gt).astype(int)
+
+    if probs.shape != gts.shape:
+        raise ValueError(f"Shape mismatch: preds {probs.shape} vs gts {gts.shape}")
+
+    preds = (probs >= threshold).astype(int)
+
+    num_samples, num_classes = preds.shape
+
+    # ---- Key counts ----
+    total_pos_gt = int(gts.sum())
+    total_pos_pred = int(preds.sum())
+    total_entries = int(num_samples * num_classes)
+
+    # Confusion totals across ALL labels (micro)
+    tp = int(((preds == 1) & (gts == 1)).sum())
+    fp = int(((preds == 1) & (gts == 0)).sum())
+    fn = int(((preds == 0) & (gts == 1)).sum())
+    tn = int(((preds == 0) & (gts == 0)).sum())
+
+    # ---- None prediction rate ----
+    none_pred_mask = preds.sum(axis=1) == 0
+    num_none = int(none_pred_mask.sum())
+
+    # ---- Metrics ----
+    subset_acc = accuracy_score(gts, preds)                      # exact match
+    hamming_acc = 1.0 - hamming_loss(gts, preds)                 # label-wise accuracy
+
+    report = classification_report(
+        gts,
+        preds,
+        target_names=classes,
+        output_dict=True,
+        zero_division=zero_division,
+    )
+
+    # ---- Print summary ----
+    print(f"Classification threshold probability: {threshold}")
+    print(f"Samples: {num_samples} | Classes: {num_classes} | Decisions: {total_entries}")
+    print(f"GT positives: {total_pos_gt} ({total_pos_gt/total_entries:.2%} of all decisions)")
+    print(f"Pred positives: {total_pos_pred} ({total_pos_pred/total_entries:.2%} of all decisions)")
+    print(f"Predicted 'None' (all-zero): {num_none} ({num_none/num_samples:.2%})")
+    print("")
+    print(f"Hamming accuracy (label-wise): {hamming_acc:.2%}")
+    print(f"Subset accuracy (exact match): {subset_acc:.2%}")
+    print(f"Micro F1:  {report['micro avg']['f1-score']:.4f}")
+    print(f"Macro F1:  {report['macro avg']['f1-score']:.4f}")
+    print("")
+
+    print(f"TP={tp} FP={fp} FN={fn} TN={tn}")
+    if total_pos_pred < max(5, 0.02 * total_pos_gt):
+        print("WARNING: Very few positive predictions relative to GT positives.")
+        print("         Your threshold is likely too high, or logits are miscalibrated.\n")
+
+    # ---- Per-class table ----
+    pos_per_class = gts.sum(axis=0)
+    print(f"{'Instrument':<15} | {'Prec':>6} | {'Recall':>6} | {'F1':>6} | {'Support':>7} | {'Pred':>5}")
+    print("-" * 70)
+
+    for i, name in enumerate(classes):
+        support = int(pos_per_class[i])
+        pred_count = int(preds[:, i].sum())
+
+        if support == 0:
+            print(f"{name:<15} | {'  n/a':>6} | {'  n/a':>6} | {'  n/a':>6} | {support:>7} | {pred_count:>5}")
+            continue
+
+        prec = report[name]["precision"]
+        rec = report[name]["recall"]
+        f1 = report[name]["f1-score"]
+        print(f"{name:<15} | {prec:6.2f} | {rec:6.2f} | {f1:6.2f} | {support:>7} | {pred_count:>5}")
+
+    # ---- Debug examples where GT had positives ----
+    if debug and sample_ids is not None:
+        print("\n--- DEBUG: Examples where GT has at least one label ---")
+        gt_nonzero = np.where(gts.sum(axis=1) > 0)[0]
+        for idx in gt_nonzero[:]:
+            pred_names = [classes[j] for j, v in enumerate(preds[idx]) if v]
+            gt_names = [classes[j] for j, v in enumerate(gts[idx]) if v]
+            print(f"ID: {sample_ids[idx]}")
+            print(f"  Predicted: {pred_names if pred_names else '(none)'}")
+            print(f"  Actual:    {gt_names if gt_names else '(none)'}")
+            print("-" * 30)
+
+    return report

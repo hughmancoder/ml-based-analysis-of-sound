@@ -2,6 +2,7 @@
 from __future__ import annotations
 from pathlib import Path
 import argparse, csv, os
+from utils.safe_paths import guard_path
 
 # TODO: this should be generated from mel spectrogram file rather than irmas
 def walk_audio(root: Path):
@@ -15,7 +16,7 @@ def class_from_irmas(p: Path) -> str:
 def class_from_folder(p: Path) -> str:
     return p.parent.name.lower()
 
-PROJECT_ROOT = Path.cwd()
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
 def to_relative_path(path: Path, base: Path = PROJECT_ROOT) -> str:
     try:
@@ -27,7 +28,7 @@ def to_relative_path(path: Path, base: Path = PROJECT_ROOT) -> str:
 
 def write_manifest(rows, out_csv: Path):
     out_csv.parent.mkdir(parents=True, exist_ok=True)
-    with open(out_csv, "w", newline="") as f:
+    with open(out_csv, "w", newline="", encoding="utf-8") as f:
         w = csv.writer(f)
         w.writerow(["filepath","label"])
         w.writerows(rows)
@@ -39,7 +40,7 @@ def main():
     ap.add_argument("--out_dir", type=str, required=True)
     args = ap.parse_args()
 
-    out_dir = Path(args.out_dir)
+    out_dir = guard_path(Path(args.out_dir), PROJECT_ROOT, "out_dir")
 
     # IRMAS
     irmas = Path(args.irmas_dir)

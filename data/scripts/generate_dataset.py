@@ -3,6 +3,19 @@ import json
 from pathlib import Path
 from pydub import AudioSegment
 
+REPO_ROOT = Path(__file__).resolve().parents[2]
+
+def guard_output_root(output_root: Path) -> Path:
+    allow_unsafe = os.environ.get("ALLOW_UNSAFE_PATHS") == "1"
+    p = Path(output_root).expanduser().resolve()
+    if allow_unsafe:
+        return p
+    if p.parent == p:
+        raise SystemExit(f"[fatal] Refusing output_root at drive root: {p}")
+    if REPO_ROOT not in p.parents and p != REPO_ROOT:
+        raise SystemExit(f"[fatal] Refusing output_root outside repo: {p} (set ALLOW_UNSAFE_PATHS=1 to override)")
+    return p
+
 def generate_dataset(json_path, output_root):
     # Configuration
     SAMPLE_RATE = 44100
@@ -19,6 +32,7 @@ def generate_dataset(json_path, output_root):
     print(f"Base directory for audio search: {base_dir}")
     print(f"Starting processing: {len(data)} source files identified.")
 
+    output_root = guard_output_root(output_root)
     for entry in data:
         relative_file_path = entry.get('file')
         # 2. Join the json's folder with the relative path in the json
